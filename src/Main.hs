@@ -11,7 +11,7 @@ import Data.Aeson
 import qualified Data.Text as T
 import Network.Wai ( Application )
 import Network.Wai.Handler.Warp ( run )
-import Network.Wai.Middleware.ReqeustLogger ( logStdoutDev )
+import Network.Wai.Middleware.RequestLogger ( logStdoutDev )
 import Servant
 import System.Directory ( createDirectoryIfMissing, withCurrentDirectory )
 import System.FilePath
