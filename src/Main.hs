@@ -11,6 +11,7 @@ import Data.Aeson
 import qualified Data.Text as T
 import Network.Wai ( Application )
 import Network.Wai.Handler.Warp ( run )
+import Network.Wai.Middleware.ReqeustLogger ( logStdoutDev )
 import Servant
 import System.Directory ( createDirectoryIfMissing, withCurrentDirectory )
 import System.FilePath
@@ -44,4 +45,4 @@ app dirLock = serve (Proxy :: Proxy ApolloApi) (server dirLock)
 main :: IO ()
 main = do
   dirLock <- newMVar ()
-  run 8082 (app dirLock)
+  run 8082 (logStdoutDev $ app dirLock)
