@@ -33,7 +33,7 @@ type ApolloApi
 
 youtubeDlArgs :: String -> [String]
 youtubeDlArgs
-  = (["--extract-audio", "--audio-format", "mp3", T.unpack downloadUrl] ++)
+  = (["--extract-audio", "--audio-format", "mp3"] ++) . pure
 
 server :: MVar () -> Server ApolloApi
 server dirLock = serveDownload where
