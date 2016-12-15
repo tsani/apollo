@@ -41,7 +41,7 @@ server dirLock = serveDownload where
   serveDownload DownloadReq{..} = liftIO $ do
     createDirectoryIfMissing True downloadPath
     withMVar dirLock $ \ _ -> withCurrentDirectory downloadPath $ do
-      callProcess "youtube-dl" (youtubeDlArgs downloadUrl)
+      callProcess "youtube-dl" (youtubeDlArgs (T.unpack downloadUrl))
 
 app :: MVar () -> Application
 app dirLock = serve (Proxy :: Proxy ApolloApi) (server dirLock)
