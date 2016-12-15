@@ -31,13 +31,17 @@ instance FromJSON DownloadReq where
 type ApolloApi
   = "download" :> ReqBody '[JSON] DownloadReq :> Post '[JSON] ()
 
+youtubeDlArgs :: String -> [String]
+youtubeDlArgs
+  = (["--extract-audio", "--audio-format", "mp3", T.unpack downloadUrl] ++)
+
 server :: MVar () -> Server ApolloApi
 server dirLock = serveDownload where
   serveDownload :: DownloadReq -> Handler ()
   serveDownload DownloadReq{..} = liftIO $ do
     createDirectoryIfMissing True downloadPath
     withMVar dirLock $ \ _ -> withCurrentDirectory downloadPath $ do
-      callProcess "youtube-dl" ["--extract-audio", T.unpack downloadUrl]
+      callProcess "youtube-dl" (youtubeDlArgs downloadUrl)
 
 app :: MVar () -> Application
 app dirLock = serve (Proxy :: Proxy ApolloApi) (server dirLock)
