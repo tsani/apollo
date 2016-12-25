@@ -24,6 +24,7 @@ executable apollo
     base >=4.9 && <4.10,
     directory >=1.2 && <1.3,
     filepath >=1.4 && <1.5,
+    free >=4.12 && <4.13,
     servant >=0.9 && <0.10,
     servant-server >=0.9 && <0.10,
     mtl >=2.2 && <2.3,
