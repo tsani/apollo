@@ -18,10 +18,9 @@ type ApolloApiV1
       :> "youtube-dl"
         :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] AddedTracks
   :<|>
-    "playlists"
-      :> "-"
-        :> "enqueue"
-          :> ReqBody '[JSON] [FilePath] :> Post '[JSON] [PlaylistItemId]
+    "playlist"
+      :> "enqueue"
+        :> ReqBody '[JSON] [FilePath] :> Post '[JSON] [PlaylistItemId]
 
 type ApolloApi = "v1" :> ApolloApiV1
 
