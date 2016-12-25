@@ -17,6 +17,11 @@ type ApolloApiV1
     :> "add"
       :> "youtube-dl"
         :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] AddedTracks
+  :<|>
+    "playlists"
+      :> "-"
+        :> "enqueue"
+          :> ReqBody '[JSON] [FilePath] :> Post '[JSON] [PlaylistItemId]
 
 type ApolloApi = "v1" :> ApolloApiV1
 
@@ -41,6 +46,10 @@ data AddedTracks
 
 instance ToJSON AddedTracks where
   toJSON AddedTracks{..} = object [ "addedTracks" .= addedTracks ]
+
+-- | A unique identifier for an item in a playlist.
+newtype PlaylistItemId = PlaylistItemId { unPlaylistItemId :: Int }
+  deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
 
 -- | A subdirectory of the music directory, typically in the format
 -- @Artist/Album@.
