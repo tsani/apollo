@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Apollo.Types where
 
@@ -8,8 +9,13 @@ import Data.Aeson
 import Data.Text ( Text, unpack )
 import Servant.API
 
-type ApolloApi
-  = "download" :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] ()
+type ApolloApiV1
+  = "tracks"
+    :> "add"
+      :> "youtube-dl"
+        :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] AddedTracks
+
+type ApolloApi = "v1" :> ApolloApiV1
 
 data YoutubeDlReq
   = YoutubeDlReq
@@ -23,4 +29,13 @@ instance FromJSON YoutubeDlReq where
     <$> (unpack <$> v .: "path")
     <*> v .: "url"
   parseJSON _ = fail "cannot parse download request from non object"
+
+data AddedTracks
+  = AddedTracks
+    { addedTracks :: [FilePath]
+    }
+  deriving (Eq, Ord, Read, Show)
+
+instance ToJSON AddedTracks where
+  toJSON AddedTracks{..} = object [ "addedTracks" .= addedTracks ]
 

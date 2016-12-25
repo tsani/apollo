@@ -11,7 +11,9 @@ import Servant
 main :: IO ()
 main = do
   dirLock <- newMVar ()
-  run 8082 (logStdoutDev $ app dirLock)
+  let port = 8082
+  putStrLn $ "Listening on port " ++ show port
+  run port (logStdoutDev $ app dirLock)
 
 app :: MVar () -> Application
 app dirLock = serve (Proxy :: Proxy ApolloApi) (server dirLock)
