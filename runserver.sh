@@ -4,12 +4,12 @@ set -e
 
 source .secrets
 
-MUSICDIR="$1"
-if test -z "$MUSICDIR" ; then
-  MUSICDIR=music
+DBDIR="$1"
+if test -z "$DBDIR" ; then
+  DBDIR=db
 fi
 
 D="$PWD"
-mkdir -p $MUSICDIR
-(cd $MUSICDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD")
+mkdir -p $DBDIR/{music,transcoded,archives}
+(cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD")
 
