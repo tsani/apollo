@@ -18,6 +18,8 @@ gets() {
   curl --silent $URL$1
 }
 
+get /archive/test.txt
+
 get /status
 
 post /playlists/enqueue '["tsani/la tsani - nuntoi pa moi.mp3"]'

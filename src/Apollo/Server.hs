@@ -6,37 +6,42 @@ module Apollo.Server
 ) where
 
 import Apollo.Types
-import Apollo.Monad
+import Apollo.Monad ( Apollo )
+import qualified Apollo.Monad as A
 
-import Control.Monad.IO.Class ( liftIO )
 import Servant
 
-server :: MpdSettings -> MpdLock -> DirLock -> Server ApolloApi
-server mpdSettings mpdLock dirLock
-  = download :<|> playlistEnqueue :<|> status :<|> transcodings where
+type ApolloServer = ServerT ApolloApi Apollo
 
-    apollo = interpretApolloIO mpdSettings mpdLock dirLock
+server :: ApolloServer
+server = topRoutes where
+  topRoutes
+    = download
+    :<|> playlistEnqueue
+    :<|> status
+    :<|> transcodings
+    :<|> archives
 
-    download :: YoutubeDlReq -> Handler AddedTracks
-    download YoutubeDlReq{..} = liftIO . apollo $ do
-      createdEntries <- youtubeDl downloadPath downloadUrl
-      pure AddedTracks
-        { addedTracks = createdEntries
-        }
+  download :: YoutubeDlReq -> Apollo [Entry]
+  download YoutubeDlReq{..} = A.youtubeDl downloadPath downloadUrl
 
-    playlistEnqueue :: [FilePath] -> Handler [PlaylistItemId]
-    playlistEnqueue entries = liftIO . apollo $ enqueueTracks entries
+  playlistEnqueue :: [FilePath] -> Apollo [PlaylistItemId]
+  playlistEnqueue = A.enqueueTracks
 
-    status :: Handler PlayerStatus
-    status = liftIO . apollo $ getPlayerStatus
+  status :: Apollo PlayerStatus
+  status = A.getPlayerStatus
 
-    transcodings = makeTranscode :<|> getTranscode where
-      makeTranscode :: TranscodeReq -> Handler TranscodeRes
-      makeTranscode TranscodeReq{..} = liftIO . apollo $ do
-        trackId <- transcodeTrack transSource transParams
-        pure TranscodeRes
-          { transTrackId = trackId
-          }
+  transcodings = makeTranscode :<|> getTranscode where
+    makeTranscode :: TranscodeReq -> Apollo TrackIdW
+    makeTranscode TranscodeReq{..} = TrackIdW
+      <$> A.transcodeTrack transSource transParams
 
-      getTranscode :: TrackId -> TranscodingParameters -> Handler LazyTrackData
-      getTranscode tid params = liftIO . apollo $ readTranscodeLazily tid params
+    getTranscode :: TrackId -> TranscodingParameters -> Apollo LazyTrackData
+    getTranscode = A.readTranscodeLazily
+
+  archives = makeArchive :<|> getArchive where
+    makeArchive :: [ArchiveEntry] -> Apollo ArchiveIdW
+    makeArchive = fmap ArchiveIdW . A.makeArchive
+
+    getArchive :: ArchiveId -> Apollo LazyArchiveData
+    getArchive = A.readArchiveLazily

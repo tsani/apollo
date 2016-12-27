@@ -13,7 +13,7 @@ import qualified Data.ByteString.Char8 as C8
 import Data.Monoid ( (<>) )
 import Data.Text ( Text )
 import qualified Data.Text as T
-import Data.Text.Encoding ( encodeUtf8 )
+import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import Data.Word ( Word16 )
 import qualified Network.MPD as MPD
 import Servant.API
@@ -26,7 +26,7 @@ type ApolloApiV1
     "tracks"
       :> "add"
         :> "youtube-dl"
-          :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] AddedTracks
+          :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] [Entry]
   :<|>
     "playlist"
       :> "enqueue"
@@ -36,15 +36,23 @@ type ApolloApiV1
       :> Get '[JSON] PlayerStatus
   :<|>
     "transcode" :> (
-      ReqBody '[JSON] TranscodeReq :> Post '[JSON] TranscodeRes
+      ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
     :<|>
       Capture "trackId" TrackId
       :> Capture "transcodingParameters" TranscodingParameters
       :> Get '[OctetStream] LazyTrackData
     )
+  :<|>
+    "archive" :> (
+      ReqBody '[JSON] [ArchiveEntry] :> Post '[JSON] ArchiveIdW
+    :<|>
+      Capture "archiveId" ArchiveId :> Get '[OctetStream] LazyArchiveData
+    )
 
 type ApolloApi = "v1" :> ApolloApiV1
 
+-- | A request to download audio from an external source using @youtube-dl@.
+-- The resulting tracks will be stored in a given 'MusicDir'.
 data YoutubeDlReq
   = YoutubeDlReq
     { downloadPath :: MusicDir
@@ -58,15 +66,6 @@ instance FromJSON YoutubeDlReq where
     <*> v .: "url"
   parseJSON _ = fail "cannot parse download request from non object"
 
-data AddedTracks
-  = AddedTracks
-    { addedTracks :: [Entry]
-    }
-  deriving (Eq, Ord, Read, Show)
-
-instance ToJSON AddedTracks where
-  toJSON AddedTracks{..} = object [ "addedTracks" .= addedTracks ]
-
 -- | A unique identifier for an item in a playlist.
 newtype PlaylistItemId = PlaylistItemId { unPlaylistItemId :: Int }
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
@@ -79,12 +78,15 @@ newtype MusicDir
     }
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
 
+-- | A strict bytestring representing audio.
 newtype TrackData = TrackData { unTrackData :: ByteString }
   deriving (MimeUnrender OctetStream, MimeRender OctetStream)
 
+-- | A lazy bytestring representing audio.
 newtype LazyTrackData = LazyTrackData { unLazyTrackData :: LBS.ByteString }
   deriving (MimeUnrender OctetStream, MimeRender OctetStream)
 
+-- | A wrapper to identify bytestrings as hashes.
 newtype Sha1Hash
   = Sha1Hash
     { unHash :: ByteString
@@ -102,6 +104,10 @@ newtype TrackId
 instance ToJSON TrackId where
   toJSON (TrackId (Sha1Hash b)) = String (T.pack (C8.unpack b))
 
+instance FromJSON TrackId where
+  parseJSON (String s) = pure $ TrackId (Sha1Hash (encodeUtf8 s))
+  parseJSON _ = fail "cannot parse trackId from non-object"
+
 data Entry
   = Entry
     { entryMusicDir :: !MusicDir
@@ -112,15 +118,20 @@ data Entry
 instance ToJSON Entry where
   toJSON Entry{..} = String (unMusicDir entryMusicDir <> "/" <> entryName)
 
+-- | Converts an entry into a path relative to the music directory.
 entryToPath :: Entry -> FilePath
-entryToPath Entry{..} = T.unpack (unMusicDir entryMusicDir) </> T.unpack entryName
+entryToPath Entry{..}
+  = T.unpack (unMusicDir entryMusicDir) </> T.unpack entryName
 
+-- | A URL to be given to @youtube-dl@ for downloading.
 newtype YoutubeDlUrl
   = YoutubeDlUrl
     { unYoutubeDlUrl :: Text
     }
   deriving (Eq, Ord, Read, Show, FromJSON, ToJSON)
 
+-- | Wraps 'MPD.State' so modules that import this one won't need to import
+-- libmpd modules.
 newtype PlaybackState
   = PlaybackState
     { unPlaybackState :: MPD.State
@@ -141,6 +152,7 @@ instance FromJSON PlaybackState where
     _ -> fail "invalid playback state"
   parseJSON _ = fail "cannot encode non-string as playback state"
 
+-- | The status of the audio player.
 data PlayerStatus
   = PlayerStatus
     { psState :: PlaybackState
@@ -200,7 +212,9 @@ instance FromHttpApiData TranscodingParameters where
       , transBitrate = bitrate
       }
 
-    where nothingLeft msg = maybe (Left msg) Right
+    where
+      -- A natural transformation from 'Maybe' to 'Either String'.
+      nothingLeft msg = maybe (Left msg) Right
 
 instance FromHttpApiData TrackId where
   parseUrlPiece t = Right (TrackId (Sha1Hash (encodeUtf8 t)))
@@ -215,21 +229,30 @@ instance FromJSON Format where
     _ -> fail "unsupported format"
   parseJSON _ = fail "format must be a string"
 
+-- | Specifies a bitrate.
+data Bitrate
+  = CBR Word16
+  -- ^ A constant bitrate.
+  | VBR Quality
+  -- ^ A variable bitrate.
+  deriving (Eq, Ord, Read, Show)
+
+-- | A measure of audio quality used for VBR encodings.
 data Quality
   = Q0 | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
+-- | Convert a quality to an integer.
+qualityToInt :: Quality -> Int
+qualityToInt = fromEnum
+
+-- | Convert an integer to a quality.
 qualityFromInt :: Int -> Maybe Quality
 qualityFromInt n
   | n >= minB && n <= maxB = Just (toEnum n)
   | otherwise = Nothing where
     minB = fromEnum (minBound :: Quality)
     maxB = fromEnum (maxBound :: Quality)
-
-data Bitrate
-  = CBR Word16
-  | VBR Quality
-  deriving (Eq, Ord, Read, Show)
 
 instance FromJSON Bitrate where
   parseJSON (Object o) = do
@@ -244,6 +267,7 @@ instance FromJSON Bitrate where
       _ -> fail "unsupported bitrate type"
   parseJSON _ = fail "cannot parse bitrate from non-object"
 
+-- | A request to transcode a track with some parameters.
 data TranscodeReq
   = TranscodeReq
     { transSource :: FilePath
@@ -256,10 +280,63 @@ instance FromJSON TranscodeReq where
     <*> o .: "params"
   parseJSON _ = fail "cannot parse transcoding request from non-object"
 
-data TranscodeRes
-  = TranscodeRes
+-- | A 'TrackId' that (de)serializes to a JSON object.
+newtype TrackIdW
+  = TrackIdW
     { transTrackId :: TrackId
     }
 
-instance ToJSON TranscodeRes where
-  toJSON TranscodeRes{..} = object [ "trackId" .= toJSON transTrackId ]
+instance ToJSON TrackIdW where
+  toJSON TrackIdW{..} = object [ "trackId" .= toJSON transTrackId ]
+
+newtype ArchiveId
+  = ArchiveId Sha1Hash
+  deriving (Eq, Ord, Read, Show)
+
+instance FromHttpApiData ArchiveId where
+  parseUrlPiece t = Right (ArchiveId (Sha1Hash (encodeUtf8 t)))
+
+instance ToJSON ArchiveId where
+  toJSON (ArchiveId (Sha1Hash b)) = String (decodeUtf8 b)
+
+-- | Wrapper to serialize 'ArchiveId' as an object instead of as a string.
+newtype ArchiveIdW
+  = ArchiveIdW ArchiveId
+
+instance ToJSON ArchiveIdW where
+  toJSON (ArchiveIdW archiveId) = object [ "archiveId" .= archiveId ]
+
+newtype LazyArchiveData
+  = LazyArchiveData LBS.ByteString
+  deriving
+    ( Eq, Ord, Read, Show
+    , MimeRender OctetStream, MimeUnrender OctetStream
+    )
+
+data ArchiveEntry
+  = ArchiveTrack FilePath
+  | ArchiveTranscode TrackId TranscodingParameters
+  deriving (Eq, Ord, Read, Show)
+
+data ArchiveEntryType
+  = ArchiveEntryTrackType
+  | ArchiveEntryTranscodeType
+
+instance FromJSON ArchiveEntryType where
+  parseJSON (String s) = case s of
+    "track" -> pure ArchiveEntryTrackType
+    "transcode" -> pure ArchiveEntryTranscodeType
+    _ -> fail "unknown archive entry type"
+  parseJSON _ = fail "cannot parse archive entry type from non-string"
+
+instance FromJSON ArchiveEntry where
+  parseJSON (Object o) = do
+    ty <- o .: "type"
+    case ty of
+      ArchiveEntryTrackType ->
+        ArchiveTrack <$> (T.unpack <$> o .: "trackPath")
+      ArchiveEntryTranscodeType ->
+        ArchiveTranscode
+          <$> o .: "trackId"
+          <*> o .: "transParams"
+  parseJSON _ = fail "cannot parse archive entry from non-object"
