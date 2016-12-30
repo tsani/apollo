@@ -1,0 +1,86 @@
+#!/bin/bash
+
+set -e
+
+if test -z "$APOLLO_BASE_URL" ; then
+  echo 'Please set the environment variable APOLLO_BASE_URL.' >&2
+  echo 'e.g. APOLLO_BASE_URL=https://apollo.example.org' >&2
+  exit 1
+fi
+
+HASPATH=0
+HASURL=0
+P=
+URL=
+CLIPBOARD=0
+ENQUEUE=1
+
+while (( $# )) ; do
+    case "$1" in
+        "-c")
+            if [ $CLIPBOARD -eq 1 ] ; then
+                echo "an explicit URL was set so clipboard mode cannot be " \
+                    "used" >&2
+                exit 1
+            fi
+            CLIPBOARD=1
+            ;;
+        "--no-enqueue")
+            ENQUEUE=0
+            ;;
+        "--enqueue")
+            ENQUEUE=1
+            ;;
+        *)
+            if [ $HASPATH -eq 0 ] ; then
+                HASPATH=1
+                P="$1"
+            elif [ $HASURL -eq 0 ] ; then
+                if [ $CLIPBOARD -eq 1 ] ; then
+                    echo "clipboard mode was set so an explicit URL cannot " \
+                        "be provided" >&2
+                    exit 1
+                fi
+                HASURL=1
+                URL="$1"
+            else
+                echo "unexpected command line argument" >&2
+                exit 1
+            fi
+    esac
+    shift
+done
+
+if [ $CLIPBOARD -eq 1 ] ; then
+    URL="$(xclip -o)"
+    echo "URL from clipboard: $URL"
+    HASURL=1
+fi
+
+if [ $HASPATH -eq 0 -a $HASURL -eq 0 ] ; then
+    echo "both a path and a URL are needed" >&2
+    exit 1
+fi
+
+post() {
+  curl --fail -H 'Content-type: application/json' --data "$2" \
+    $APOLLO_BASE_URL/v1$1
+}
+
+put() {
+  curl -X PUT --fail -H 'Content-type: application/json' --data "$2" \
+    $APOLLO_BASE_URL/v1$1
+}
+
+if [ $ENQUEUE -eq 1 ] ; then
+  enqueue() {
+    put /playlist "$(jq .addedTracks)"
+  }
+else
+  enqueue() {
+    cat
+  }
+fi
+
+post /tracks/add/youtube-dl "{ \"url\": \"$URL\", \"path\": \"$P\" }" |
+enqueue
