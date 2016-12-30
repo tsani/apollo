@@ -64,7 +64,7 @@ import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import qualified System.Directory as Dir
-import System.FilePath ( (</>), takeFileName )
+import System.FilePath ( (</>) )
 import System.IO.Temp ( withTempDirectory )
 
 -- | Base functor for the 'Apollo' monad.
@@ -378,8 +378,7 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
               ArchiveTranscode tid params -> do
                 m <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
                 p <- maybe (throwError $ NoSuchTranscode tid params) pure m
-                let f = takeFileName p
-                pure (p, "transcoded" </> transcodeDirectoryFor tid params </> f)
+                pure (p, "transcoded" </> transcodeDirectoryFor tid params)
             let opts = [Zip.OptVerbose, Zip.OptLocation dstP False]
             liftIO $ Zip.addFilesToArchive opts a [srcP]
 
