@@ -9,6 +9,9 @@ source testfuns
 post /archive '[{ "type": "track", "trackPath": "lol/foo/the smash community-RBqm1svadxg.mp3" }]'
 post /archive '[{ "type": "track", "trackPath": "lol/foo/the smash community-RBqm1svadxg.mp3" }]'
 
+post /archive \
+  '[{ "type": "track", "trackPath": "lol/foo/the smash community-RBqm1svadxg.mp3" }, { "type": "transcode", "trackId": "963fe7ffee22e9f40bbbf5930bc7419ff5780076", "transParams": { "format": "mp3", "bitrate": { "type": "vbr", "value": 2 } } }]'
+
 get /status
 
 get /playlist
