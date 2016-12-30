@@ -6,7 +6,8 @@ testvid="https://www.youtube.com/watch?v=RBqm1svadxg"
 
 source testfuns
 
-gets /archive/test.txt
+post /archive '[{ "type": "track", "trackPath": "lol/foo/the smash community-RBqm1svadxg.mp3" }]'
+post /archive '[{ "type": "track", "trackPath": "lol/foo/the smash community-RBqm1svadxg.mp3" }]'
 
 get /status
 

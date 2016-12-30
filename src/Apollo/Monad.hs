@@ -6,6 +6,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -38,27 +39,32 @@ module Apollo.Monad
 , makeMpdLock
 ) where
 
+import Apollo.Archive
 import Apollo.Crypto
 import Apollo.Transcoding
 import Apollo.Types
 import qualified Apollo.YoutubeDl as Y
 
+import qualified Codec.Archive.Zip as Zip
 import Control.Concurrent.MVar
-import Control.Monad ( forM_ )
+import Control.Monad ( foldM, forM_ )
 import Control.Monad.Free
 import Control.Monad.Except
+import qualified Data.Binary as Bin
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
 import Data.Default.Class
 import Data.Foldable ( for_ )
 import Data.Maybe ( fromJust )
+import Data.Monoid ( (<>) )
 import Data.String ( fromString )
 import qualified Data.Text as T
+import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import qualified System.Directory as Dir
-import System.FilePath ( (</>) )
+import System.FilePath ( (</>), takeFileName )
 import System.IO.Temp ( withTempDirectory )
 
 -- | Base functor for the 'Apollo' monad.
@@ -260,7 +266,7 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
   withCwd d = ApolloIO . ExceptT . Dir.withCurrentDirectory d . runExceptT . unApolloIO
 
   phi :: ApolloF (ApolloIO a) -> ApolloIO a
-  phi m = case m of
+  phi = \case
     YoutubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) k -> do
       let dp = T.unpack musicDirT
       let url = T.unpack dlUrl
@@ -358,4 +364,29 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
       let p = C8.unpack b
       in k =<< (liftIO $ readArchiveLazilyIO (archiveDirP </> p))
 
-    MakeArchive entries k -> error "MakeArchive" entries k
+    MakeArchive entries k -> do
+      let archiveId@(ArchiveId (Sha1Hash idB)) = makeArchiveId entries
+
+      liftIO (getExistingArchive (Just archiveDirP) archiveId) >>= \case
+        Just _ -> pure ()
+        Nothing -> do
+          let forFoldM i xs g = foldM g i xs
+          archive <- forFoldM Zip.emptyArchive entries $ \a e -> do
+            -- compute the path to read from, and the path to put in the archive
+            (srcP, dstP) <- case e of
+              ArchiveTrack p -> pure (musicDirP </> p, "raw" </> p)
+              ArchiveTranscode tid params -> do
+                m <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
+                p <- maybe (throwError $ NoSuchTranscode tid params) pure m
+                let f = takeFileName p
+                pure (p, "transcoded" </> transcodeDirectoryFor tid params </> f)
+            let opts = [Zip.OptVerbose, Zip.OptLocation dstP False]
+            liftIO $ Zip.addFilesToArchive opts a [srcP]
+
+          let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
+          let utf8str = encodeUtf8 . T.pack
+          liftIO $ Bin.encodeFile
+            archivePath
+            archive { Zip.zComment = LBS.fromStrict (utf8str "Apollo archive " <> idB) }
+
+      k archiveId
