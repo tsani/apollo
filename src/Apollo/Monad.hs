@@ -356,7 +356,7 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
     ReadTranscodeLazily t params k -> do
       mp <- liftIO $ getExistingTranscode (Just transcodeDirP) t params
       d <- case mp of
-        Just transcodePath -> liftIO $ readTrackLazilyIO (transcodeDirP </> transcodePath)
+        Just transcodePath -> liftIO $ readTrackLazilyIO transcodePath
         Nothing -> throwError $ NoSuchTranscode t params
       k d
 
