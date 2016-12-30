@@ -46,23 +46,28 @@ transcodingParametersToPathComponent TranscodingParameters{..}
 -- Returns 'Nothing' if the transcode does not exist. Else, returns the path
 -- relative to the transcode directory where the transcode may be found.
 --
--- /Precondition:/ must be in the transcode directory!
-getExistingTranscode :: TrackId -> TranscodingParameters -> IO (Maybe FilePath)
-getExistingTranscode tid tsp
+-- The @Maybe FilePath@ parameter is a prefix to apply to computed paths to
+-- get into the transcode directory. If it is 'Nothing', then we assume that we
+-- are in the transcode directory.
+getExistingTranscode
+  :: Maybe FilePath
+  -> TrackId
+  -> TranscodingParameters
+  -> IO (Maybe FilePath)
+getExistingTranscode prefix tid tsp
   = do
     t <- doesDirectoryExist dir
     if t
     then do
-      -- TODO extremely unsafe! Assumption that if the transcode dir exists for
-      -- a given track and parameters, then it is nonempty! However, if the
-      -- server gets killed between the moment when the dir is created and the
-      -- transcoding process is called, then the dir will exist and be empty,
-      -- causing the following line to crash!
-      f <- head <$> listDirectory dir
-      pure (Just $ dir </> f)
+      mf <- listDirectory dir
+      pure $ case mf of
+        [] -> Nothing
+        (f:_) -> Just (dir </> f)
     else pure Nothing
   where
-    dir = transcodeDirectoryFor tid tsp
+    dir = case prefix of
+      Just p -> p </> transcodeDirectoryFor tid tsp
+      Nothing -> transcodeDirectoryFor tid tsp
 
 -- | Computes the relative path to the directory within the transcode directory
 -- where the transcoded audio of the given track ID ought to be stored.

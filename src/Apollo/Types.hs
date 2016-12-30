@@ -1,15 +1,49 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ViewPatterns #-}
 
-module Apollo.Types where
+module Apollo.Types
+( ApolloApi
+, YoutubeDlReq(..)
+, PlaylistItemId(..)
+, MusicDir(..)
+, TrackData(..)
+, LazyTrackData(..)
+, LazyArchiveData(..)
+, Sha1Hash(..)
+, TrackId(..)
+, TrackIdW(..)
+, Entry(..)
+, YoutubeDlUrl(..)
+, PlaybackState(..)
+, PlayerStatus(..)
+, TranscodingParameters(..)
+, Format(..)
+, Bitrate(..)
+, Quality(..)
+, TranscodeReq(..)
+, ArchiveId(..)
+, ArchiveIdW(..)
+, ArchiveEntry(..)
+, Playlist(..)
+, PlaylistEntry(..)
+, PlaylistPosition(..)
+, PositionBetweenTracks(..)
+, Seconds(..)
+, NonZero
+, nonZero
+) where
 
 import Data.Aeson
 import Data.ByteString ( ByteString )
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as C8
+import Data.Default.Class ( Default(..) )
+import Data.List ( intercalate )
 import Data.Monoid ( (<>) )
 import Data.Text ( Text )
 import qualified Data.Text as T
@@ -28,9 +62,15 @@ type ApolloApiV1
         :> "youtube-dl"
           :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] [Entry]
   :<|>
-    "playlist"
-      :> "enqueue"
-          :> ReqBody '[JSON] [FilePath] :> Post '[JSON] [PlaylistItemId]
+    "playlist" :> (
+      Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
+    :<|>
+      QueryParam "position" PositionBetweenTracks
+        :> ReqBody '[JSON] [FilePath]
+        :> Put '[JSON] [PlaylistItemId]
+    :<|>
+      Get '[JSON] Playlist
+    )
   :<|>
     "status"
       :> Get '[JSON] PlayerStatus
@@ -69,6 +109,13 @@ instance FromJSON YoutubeDlReq where
 -- | A unique identifier for an item in a playlist.
 newtype PlaylistItemId = PlaylistItemId { unPlaylistItemId :: Int }
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
+
+instance FromHttpApiData [PlaylistItemId] where
+  parseUrlPiece "" = pure []
+  parseUrlPiece (T.breakOn "," -> (h, T.drop 1 -> t))
+    = (:) <$> (me $ PlaylistItemId <$> readMaybe (T.unpack h)) <*> parseUrlPiece t where
+      me Nothing = Left ("failed to parse playlist item id " <> h)
+      me (Just x) = Right x
 
 -- | A subdirectory of the music directory, typically in the format
 -- @Artist/Album@.
@@ -340,3 +387,98 @@ instance FromJSON ArchiveEntry where
           <$> o .: "trackId"
           <*> o .: "transParams"
   parseJSON _ = fail "cannot parse archive entry from non-object"
+
+data Playlist
+  = Playlist
+    { playlistTracks :: [PlaylistEntry]
+    , playlistNowPlaying :: Maybe PlaylistItemId
+    }
+  deriving (Eq, Ord, Read, Show)
+
+instance ToJSON Playlist where
+  toJSON Playlist{..} = object
+    [ "tracks" .= playlistTracks
+    , "nowPlaying" .= playlistNowPlaying
+    ]
+
+data PlaylistEntry
+  = PlaylistEntry
+    { entryPath :: FilePath
+    , entryId :: PlaylistItemId
+    , entryPosition :: PlaylistPosition
+    , entryDuration :: Seconds
+    }
+  deriving (Eq, Ord, Read, Show)
+
+instance ToJSON PlaylistEntry where
+  toJSON PlaylistEntry{..} = object
+    [ "id" .= entryId
+    , "path" .= entryPath
+    , "duration" .= entryDuration
+    , "position" .= entryPosition
+    ]
+
+-- | Represents a position between tracks, for specifying where tracks ought to
+-- be inserted in the playlist.
+--
+-- Each relative mark in the playlist is offset by a nonzero integer. We omit
+-- zero because it feels especially arbitrary to say that inserting a track
+-- /zero/ tracks before or after another should mean that the inserted track
+-- comes before or after.
+--
+-- Hence, @FromBeginning 1@ refers to the position after the first track in the
+-- playlist, but before the second, and @FromBeginning (-1)@ refers to the
+-- position immediately before the first track in the playlist.
+data PositionBetweenTracks
+  -- | A position relative to the beginning of the playlist.
+  --
+  -- All negative values are equivalent in this constructor.
+  = FromBeginning NonZero
+  -- | A position relative to the end of the playlist.
+  --
+  -- All positive values are equivalent in this constructor.
+  | FromEnd NonZero
+  -- | A position relative to the currently playing track.
+  | FromPlaying NonZero
+  deriving (Eq, Ord, Read, Show)
+
+instance Default PositionBetweenTracks where
+  def = FromPlaying def
+
+instance FromHttpApiData PositionBetweenTracks where
+  parseUrlPiece = parse . T.breakOn "_" where
+    parse (markStr, T.drop 1 -> offsetStr)
+      = parseMark markStr <*> parseOffset offsetStr
+
+    parseMark s = case s of
+      "start" -> Right FromBeginning
+      "end" -> Right FromEnd
+      "playing" -> Right FromPlaying
+      _ -> Left $ T.pack $ intercalate " "
+        [ "unknown relative position"
+        , T.unpack s
+        , "- valid positions are:"
+        , intercalate ", " ["start", "end", "playing"]
+        ]
+
+    parseOffset s = case readMaybe (T.unpack s) >>= nonZeroFromInt of
+      Just n -> Right n
+      Nothing -> Left "failed to parse nonzero number"
+
+newtype NonZero = NonZero { nonZero :: Int }
+  deriving (Eq, Ord, Read, Show)
+
+instance Default NonZero where
+  def = NonZero 1
+
+nonZeroFromInt :: Int -> Maybe NonZero
+nonZeroFromInt 0 = Nothing
+nonZeroFromInt n = Just (NonZero n)
+
+newtype PlaylistPosition
+  = PlaylistPosition Int
+  deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
+
+newtype Seconds
+  = Seconds Integer
+  deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)

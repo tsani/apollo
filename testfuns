@@ -1,0 +1,33 @@
+URL="http://localhost:8082/v1"
+
+post_ () {
+  curl -v -H 'Content-type: application/json' --data "$2" $URL$1
+}
+
+post() {
+  post_ "$@" | jq .
+}
+
+put_ () {
+  curl -X PUT -v -H 'Content-type: application/json' --data "$2" $URL$1
+}
+
+put() {
+  put_ "$@" | jq .
+}
+
+get() {
+  curl -v $URL$1 | jq .
+}
+
+gets() {
+  curl --silent $URL$1
+}
+
+deleteX() {
+  curl -v -X DELETE $URL$1 | jq .
+}
+
+delete() {
+  curl -v -X DELETE -H 'Content-type: application/json' --data "$2" $URL$1 | jq .
+}

@@ -8,6 +8,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Apollo.Monad
 ( -- * Apollo monad
@@ -17,6 +18,8 @@ module Apollo.Monad
 , youtubeDl
 , getPlayerStatus
 , enqueueTracks
+, deleteTracks
+, getPlaylist
 , transcodeTrack
 , readTrackLazily
 , readTranscodeLazily
@@ -48,6 +51,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
 import Data.Default.Class
+import Data.Foldable ( for_ )
+import Data.Maybe ( fromJust )
 import Data.String ( fromString )
 import qualified Data.Text as T
 import Data.Traversable ( for )
@@ -65,7 +70,11 @@ data ApolloF next
   | GetPlayerStatus (PlayerStatus -> next)
   -- | Enqueues the given tracks for playback after the current playing track,
   -- if any.
-  | EnqueueTracks [FilePath] ([PlaylistItemId] -> next)
+  | EnqueueTracks PositionBetweenTracks [FilePath] ([PlaylistItemId] -> next)
+  -- | Deletes the given tracks from the playlist.
+  | DeleteTracks [PlaylistItemId] next
+  -- | Gets the playlist.
+  | GetPlaylist (Playlist -> next)
   -- | Transcode a given track with given transcoding parameters.
   -- The unique identifier for the track is returned.
   | Transcode FilePath TranscodingParameters (TrackId -> next)
@@ -94,8 +103,14 @@ getPlayerStatus :: Apollo PlayerStatus
 getPlayerStatus = liftF $ GetPlayerStatus id
 
 -- | See 'EnqueueTracks'.
-enqueueTracks :: [FilePath] -> Apollo [PlaylistItemId]
-enqueueTracks tracks = liftF $ EnqueueTracks tracks id
+enqueueTracks :: PositionBetweenTracks -> [FilePath] -> Apollo [PlaylistItemId]
+enqueueTracks pos tracks = liftF $ EnqueueTracks pos tracks id
+
+deleteTracks :: [PlaylistItemId] -> Apollo ()
+deleteTracks items = liftF $ DeleteTracks items ()
+
+getPlaylist :: Apollo Playlist
+getPlaylist = liftF $ GetPlaylist id
 
 -- | See 'Transcode'.
 transcodeTrack :: FilePath -> TranscodingParameters -> Apollo TrackId
@@ -194,6 +209,18 @@ newtype ApolloIO a
     }
   deriving (Functor, Applicative, Monad, MonadError ApolloError, MonadIO)
 
+-- | Convert an MPD @Song@ into a @PlaylistEntry@ using 'fromJust' for the
+-- components that are wrapped in 'Maybe'. This is only safe to do when the
+-- songs come from a playlist, in which case the components wrapped in @Maybe@
+-- are guaranteed to be 'Just'.
+unsafeSongToPlaylistEntry :: MPD.Song -> PlaylistEntry
+unsafeSongToPlaylistEntry MPD.Song{..} = PlaylistEntry
+  { entryPath = MPD.toString sgFilePath
+  , entryId = PlaylistItemId . (\(MPD.Id i) -> i) $ fromJust sgId
+  , entryPosition = PlaylistPosition $ fromJust sgIndex
+  , entryDuration = Seconds sgLength
+  }
+
 runApolloIO :: ApolloIO a -> IO (Either ApolloError a)
 runApolloIO = runExceptT . unApolloIO
 
@@ -218,8 +245,6 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
     liftIO $ putStrLn $ "cwd <- " ++ d
     pure x
   inMusicDir = inDir musicDirP
-  inTranscodeDir = inDir transcodeDirP
-  inArchiveDir = inDir archiveDirP
 
   withTempDirectory' :: String -> String -> (FilePath -> ApolloIO a) -> ApolloIO a
   withTempDirectory' x y action =
@@ -271,32 +296,51 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
 
       k status
 
-    EnqueueTracks tracks k -> do
+    EnqueueTracks pos tracks k -> do
       rs <- runMpdLockedEx $ do
-        enqueuePos <- fmap (+1) . MPD.stSongPos <$> MPD.status
+        liftIO $ print pos
+        enqueuePos <- case pos of
+          FromBeginning (nonZero -> n) -> pure $ Just $ if n < 0 then 0 else n
+          FromEnd (nonZero -> n) -> do
+            l <- fromIntegral . MPD.stPlaylistLength <$> MPD.status
+            pure $ Just $ if n < 0 then l + n else l
+          FromPlaying (nonZero -> n) ->
+            fmap (if n < 0 then (+ (n+1)) else (+ n)) . MPD.stSongPos <$> MPD.status
+
         for (reverse tracks) $
           \track ->
             PlaylistItemId . (\(MPD.Id i) -> i)
               <$> MPD.addId (fromString track) enqueuePos
       k rs
 
+    DeleteTracks items k -> (k <*) $ runMpdLockedEx $ do
+      for_ items $ \(PlaylistItemId i) -> MPD.deleteId (MPD.Id i)
+
+    GetPlaylist k -> do
+      (entries, st) <- runMpdLockedEx $ (,)
+        <$> ((unsafeSongToPlaylistEntry <$>) <$> MPD.playlistInfo Nothing)
+        <*> (MPD.stSongID <$> MPD.status)
+      k Playlist
+        { playlistTracks = entries
+        , playlistNowPlaying = st >>= (\(MPD.Id i) -> pure $ PlaylistItemId i)
+        }
+
     Transcode track params k -> do
       -- TODO we read the entire track into memory to compute the hash. This is
       -- wasteful. We could stream the data on disk into the hashing function
       -- to operate in constant memory.
-      d <- inMusicDir (liftIO $ readTrackIO track)
+      d <- liftIO $ readTrackIO (musicDirP </> track)
       let tid = trackId d
       liftIO $ putStrLn $ "computed track ID " ++ show tid
-      mp <- inTranscodeDir (liftIO $ getExistingTranscode tid params)
+      mp <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
       liftIO $ putStrLn "got existing transcode"
       _ <- case mp of
         Just transcodePath -> pure (transcodeDirP </> transcodePath)
           -- then the transcode exists, so no work to do.
-        Nothing -> do -- no transcode exists, so we have to make one
+        Nothing -> liftIO $ do -- no transcode exists, so we have to make one
           let dir = transcodeDirectoryFor tid params
-          inTranscodeDir (liftIO $ Dir.createDirectoryIfMissing True dir)
-          outFile <- liftIO $ transcode (musicDirP </> track) (transcodeDirP </> dir) params
-          pure outFile
+          Dir.createDirectoryIfMissing True (transcodeDirP </> dir)
+          transcode (musicDirP </> track) (transcodeDirP </> dir) params
 
       k tid
 
@@ -304,11 +348,10 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
       -> k =<< (liftIO $ readTrackLazilyIO (musicDirP </> track))
 
     ReadTranscodeLazily t params k -> do
-      d <- inTranscodeDir $ do
-        mp <- liftIO $ getExistingTranscode t params
-        case mp of
-          Just transcodePath -> liftIO $ readTrackLazilyIO transcodePath
-          Nothing -> throwError $ NoSuchTranscode t params
+      mp <- liftIO $ getExistingTranscode (Just transcodeDirP) t params
+      d <- case mp of
+        Just transcodePath -> liftIO $ readTrackLazilyIO (transcodeDirP </> transcodePath)
+        Nothing -> throwError $ NoSuchTranscode t params
       k d
 
     ReadArchiveLazily (ArchiveId (Sha1Hash b)) k ->

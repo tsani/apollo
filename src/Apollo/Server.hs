@@ -9,6 +9,7 @@ import Apollo.Types
 import Apollo.Monad ( Apollo )
 import qualified Apollo.Monad as A
 
+import Data.Default.Class ( def )
 import Servant
 
 type ApolloServer = ServerT ApolloApi Apollo
@@ -17,7 +18,7 @@ server :: ApolloServer
 server = topRoutes where
   topRoutes
     = download
-    :<|> playlistEnqueue
+    :<|> playlist
     :<|> status
     :<|> transcodings
     :<|> archives
@@ -25,8 +26,19 @@ server = topRoutes where
   download :: YoutubeDlReq -> Apollo [Entry]
   download YoutubeDlReq{..} = A.youtubeDl downloadPath downloadUrl
 
-  playlistEnqueue :: [FilePath] -> Apollo [PlaylistItemId]
-  playlistEnqueue = A.enqueueTracks
+  playlist = deleteTracks :<|> enqueueTracks :<|> getPlaylist where
+    deleteTracks :: [PlaylistItemId] -> Apollo Playlist
+    deleteTracks items = A.deleteTracks items *> A.getPlaylist
+
+    enqueueTracks
+      :: Maybe PositionBetweenTracks
+      -> [FilePath]
+      -> Apollo [PlaylistItemId]
+    enqueueTracks Nothing = A.enqueueTracks def
+    enqueueTracks (Just pos) = A.enqueueTracks pos
+
+    getPlaylist :: Apollo Playlist
+    getPlaylist = A.getPlaylist
 
   status :: Apollo PlayerStatus
   status = A.getPlayerStatus
