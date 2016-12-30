@@ -360,8 +360,11 @@ newtype LazyArchiveData
     , MimeRender OctetStream, MimeUnrender OctetStream
     )
 
+-- | An item to archive.
 data ArchiveEntry
+  -- | Archive a raw track.
   = ArchiveTrack FilePath
+  -- | Archive a transcode.
   | ArchiveTranscode TrackId TranscodingParameters
   deriving (Eq, Ord, Read, Show)
 
