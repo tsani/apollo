@@ -1,0 +1,98 @@
+#!/bin/bash
+
+set -e
+
+if test -z "$APOLLO_BASE_URL" ; then
+  echo 'Please set the environment variable APOLLO_BASE_URL.' >&2
+  echo 'e.g. APOLLO_BASE_URL=https://apollo.example.org' >&2
+  exit 1
+fi
+
+VERSION=v1
+URL=$APOLLO_BASE_URL$VERSION
+
+# transcoding parameters
+PARAMS='{ "format": "mp3", "bitrate": { "type": "vbr", "value": 2 }}'
+
+require() {
+  local PROG="$1"
+  if ! which "$PROG" > /dev/null ; then
+    echo "apollo-export requires $PROG" >&2
+    exit 1
+  fi
+}
+
+require jq
+require curl
+require wc
+
+get() {
+  # echo "GET $1" >&2
+  curl --fail --silent $URL$1
+}
+
+post() {
+  # echo "POST $1" >&2
+  curl --fail -H 'Content-type: application/json' --data "$2" --silent $URL$1
+}
+
+PLAYLIST="$(mktemp)"
+ARCHIVEREQ="$(mktemp)"
+
+cleanup() {
+  rm "$PLAYLIST"
+  rm "$ARCHIVEREQ"
+}
+
+trap cleanup EXIT
+
+# dump the playlist to a file, and edit that file interactively
+get /playlist | jq .tracks[].path > "$PLAYLIST"
+$EDITOR "$PLAYLIST"
+
+TOTAL=$(cat "$PLAYLIST" | wc -l)
+
+# sends a transcode request for the track, and prints its trackId
+transcode() {
+  local TRACK="$1"
+  post /transcode "{ \"source\": $TRACK, \"params\": $PARAMS }" | jq .trackId
+}
+
+transcode_failed() {
+  echo '' >&2
+  echo "Transcoding failed for track $1" >&2
+  exit 1
+}
+
+overwrite_stderr() {
+  echo -en '\r\e[0K' >&2
+}
+
+update_progress() {
+  local COMPLETE="$1"
+  overwrite_stderr
+  echo -n "$COMPLETE / $TOTAL" >&2
+}
+
+archive() {
+  post /archive "$(cat "$ARCHIVEREQ")"
+}
+
+get_archive() {
+  get /archive/$1
+}
+
+echo 'Transcoding...' >&2
+i=0
+cat "$PLAYLIST" | while read TRACK ; do
+  transcode "$TRACK" || transcode_failed "$TRACK"
+  i=$(( $i + 1 ))
+  update_progress $i
+done |
+jq -s "map({ type: \"transcode\", transParams: $PARAMS, trackId: . })" > "$ARCHIVEREQ"
+
+echo ''
+echo 'Transcoding complete.' >&2
+
+echo 'Archiving...' >&2
+archive | jq -r .archiveId | xargs -I {} curl "$URL/archive/{}" > apollo-export.zip
