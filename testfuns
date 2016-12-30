@@ -1,4 +1,8 @@
-URL="http://localhost:8082/v1"
+if [ "$APOLLO_BASE_URL" = "" ] ; then
+  URL="http://localhost:8082/v1"
+else
+  URL="$APOLLO_BASE_URL/v1"
+fi
 
 post_ () {
   curl -v -H 'Content-type: application/json' --data "$2" $URL$1
