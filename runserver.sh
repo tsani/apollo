@@ -20,14 +20,11 @@ else
 fi
 
 DBDIR="$1"
-if test -z "$DBDIR" ; then
-  echo 'No database directory set. Defaulting to ./db.'
-  DBDIR=db
-fi
+shift
 
 echo $HOST $PORT $PASSWORD
 
 D="$PWD"
 mkdir -p $DBDIR/{music,transcoded,archives}
-(cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD")
+(cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD" $@)
 
