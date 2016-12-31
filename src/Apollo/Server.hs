@@ -52,8 +52,14 @@ server = topRoutes where
     getTranscode = A.readTranscodeLazily
 
   archives = makeArchive :<|> getArchive where
-    makeArchive :: [ArchiveEntry] -> Apollo ArchiveIdW
-    makeArchive = fmap ArchiveIdW . A.makeArchive
+    makeArchive :: [ArchiveEntry] -> Apollo ArchivalResult
+    makeArchive entries = do
+      archiveId <- A.makeArchive entries
+      archiveUrl <- A.getStaticUrl (StaticArchive archiveId)
+      pure ArchivalResult
+        { archivalResId = archiveId
+        , archivalResUrl = archiveUrl
+        }
 
     getArchive :: ArchiveId -> Apollo LazyArchiveData
     getArchive = A.readArchiveLazily

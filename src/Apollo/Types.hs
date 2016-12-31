@@ -27,7 +27,7 @@ module Apollo.Types
 , Quality(..)
 , TranscodeReq(..)
 , ArchiveId(..)
-, ArchiveIdW(..)
+, ArchivalResult(..)
 , ArchiveEntry(..)
 , Playlist(..)
 , PlaylistEntry(..)
@@ -36,6 +36,8 @@ module Apollo.Types
 , Seconds(..)
 , NonZero
 , nonZero
+, Url(..)
+, StaticResource(..)
 ) where
 
 import Data.Aeson
@@ -84,7 +86,7 @@ type ApolloApiV1
     )
   :<|>
     "archive" :> (
-      ReqBody '[JSON] [ArchiveEntry] :> Post '[JSON] ArchiveIdW
+      ReqBody '[JSON] [ArchiveEntry] :> Post '[JSON] ArchivalResult
     :<|>
       Capture "archiveId" ArchiveId :> Get '[OctetStream] LazyArchiveData
     )
@@ -347,11 +349,17 @@ instance ToJSON ArchiveId where
   toJSON (ArchiveId (Sha1Hash b)) = String (decodeUtf8 b)
 
 -- | Wrapper to serialize 'ArchiveId' as an object instead of as a string.
-newtype ArchiveIdW
-  = ArchiveIdW ArchiveId
+data ArchivalResult
+  = ArchivalResult
+    { archivalResId :: ArchiveId
+    , archivalResUrl :: Url
+    }
 
-instance ToJSON ArchiveIdW where
-  toJSON (ArchiveIdW archiveId) = object [ "archiveId" .= archiveId ]
+instance ToJSON ArchivalResult where
+  toJSON ArchivalResult{..} = object
+    [ "archiveId" .= archivalResId
+    , "archiveUrl" .= archivalResUrl
+    ]
 
 newtype LazyArchiveData
   = LazyArchiveData LBS.ByteString
@@ -484,4 +492,16 @@ newtype PlaylistPosition
 
 newtype Seconds
   = Seconds Integer
+  deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
+
+data StaticResource
+  = StaticArchive ArchiveId
+  | StaticTranscode TrackId TranscodingParameters
+  | StaticTrack FilePath
+  deriving (Eq, Ord, Read, Show)
+
+newtype Url
+  = Url
+    { unUrl :: T.Text
+    }
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)

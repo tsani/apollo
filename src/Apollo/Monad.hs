@@ -7,6 +7,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -26,12 +27,15 @@ module Apollo.Monad
 , readTranscodeLazily
 , readArchiveLazily
 , makeArchive
+, getStaticUrl
   -- ** Interpreters
 , interpretApolloIO
 , ApolloIO
 , runApolloIO
 , ApolloError(..)
   -- * Misc
+, ApolloSettings(..)
+, ServerSettings(..)
 , MpdSettings(..)
 , DirLock
 , MpdLock
@@ -95,6 +99,7 @@ data ApolloF next
   | ReadArchiveLazily ArchiveId (LazyArchiveData -> next)
   -- | Create an archive with the given items.
   | MakeArchive [ArchiveEntry] (ArchiveId -> next)
+  | GetStaticUrl StaticResource (Url -> next)
   deriving Functor
 
 -- | The Apollo free monad.
@@ -135,6 +140,9 @@ readArchiveLazily i = liftF $ ReadArchiveLazily i id
 
 makeArchive :: [ArchiveEntry] -> Apollo ArchiveId
 makeArchive entries = liftF $ MakeArchive entries id
+
+getStaticUrl :: StaticResource -> Apollo Url
+getStaticUrl res = liftF $ GetStaticUrl res id
 
 -- | A lock for the current working directory. Since the CWD is global state,
 -- we need to ensure that only one thread changes directories at a time.
@@ -182,6 +190,26 @@ instance Default MpdSettings where
     }
 
 newtype MpdError = MpdError MPD.MPDError deriving Show
+
+data ServerSettings
+  = ServerSettings
+    { serverDomain :: T.Text
+    , serverScheme :: T.Text
+    , serverPort :: Int
+    }
+
+serverSettingsBaseUrl :: ServerSettings -> Url
+serverSettingsBaseUrl ServerSettings{..} = Url u where
+  u = serverScheme <> "://" <> serverDomain <> ":" <> T.pack (show serverPort)
+
+data ApolloSettings
+  = ApolloSettings
+    { apolloApiServerSettings :: ServerSettings
+    , apolloStaticServerSettings :: ServerSettings
+    , apolloDirLock :: DirLock
+    , apolloMpdLock :: MpdLock
+    , apolloMpdSettings :: MpdSettings
+    }
 
 -- | Reads an entire track into memory strictly.
 --
@@ -231,8 +259,10 @@ runApolloIO :: ApolloIO a -> IO (Either ApolloError a)
 runApolloIO = runExceptT . unApolloIO
 
 -- | Execute apollo actions in the IO monad, with some distinguished errors.
-interpretApolloIO :: MpdSettings -> MpdLock -> DirLock -> Apollo a -> ApolloIO a
-interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
+interpretApolloIO :: ApolloSettings -> Apollo a -> ApolloIO a
+interpretApolloIO ApolloSettings{..} = iterM phi where
+  MpdSettings{..} = apolloMpdSettings
+
   runMpd = MPD.withMPDEx mpdHost mpdPort mpdPassword
 
   runMpdLockedEx action = withMpdLock' $ do
@@ -257,10 +287,10 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
     ApolloIO $ ExceptT $ withTempDirectory x y (runExceptT . unApolloIO . action)
 
   withDirLock' :: ApolloIO a -> ApolloIO a
-  withDirLock' = ApolloIO . ExceptT . withDirLock dirLock . runExceptT . unApolloIO
+  withDirLock' = ApolloIO . ExceptT . withDirLock apolloDirLock . runExceptT . unApolloIO
 
   withMpdLock' :: ApolloIO a -> ApolloIO a
-  withMpdLock' = ApolloIO . ExceptT . withMpdLock mpdLock . runExceptT . unApolloIO
+  withMpdLock' = ApolloIO . ExceptT . withMpdLock apolloMpdLock . runExceptT . unApolloIO
 
   withCwd :: FilePath -> ApolloIO a -> ApolloIO a
   withCwd d = ApolloIO . ExceptT . Dir.withCurrentDirectory d . runExceptT . unApolloIO
@@ -389,3 +419,10 @@ interpretApolloIO MpdSettings{..} mpdLock dirLock = iterM phi where
             archive { Zip.zComment = LBS.fromStrict (utf8str "Apollo archive " <> idB) }
 
       k archiveId
+
+    GetStaticUrl res k -> (>>= k) $ case res of
+      StaticArchive (ArchiveId (Sha1Hash b)) -> do
+        let (Url baseUrl) = serverSettingsBaseUrl apolloStaticServerSettings
+        pure $ Url $ (baseUrl <> "/archives/" <> decodeUtf8 b)
+      StaticTranscode tid params -> error "StaticTranscode" tid params
+      StaticTrack p -> error "StaticTrack" p

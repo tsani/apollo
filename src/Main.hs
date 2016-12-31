@@ -9,9 +9,9 @@ import Apollo.Monad
   , runApolloIO
   , makeMpdLock
   , makeDirLock
+  , ApolloSettings(..)
+  , ServerSettings(..)
   , MpdSettings(..)
-  , MpdLock
-  , DirLock
   , interpretApolloIO
   )
 
@@ -31,18 +31,38 @@ import Prelude hiding ( (.) )
 
 main :: IO ()
 main = do
-  [host, port', pass] <- getArgs
-  let port = read port'
-  let settings = MpdSettings { mpdHost = host, mpdPort = port, mpdPassword = pass }
+  [p, host, port', pass, apiScheme, apiDomain, apiPort', stScheme, stDomain, stPort'] <- getArgs
+  let (port, apiPort, stPort) = (read port', read apiPort', read stPort')
+
   mpdLock <- makeMpdLock
   dirLock <- makeDirLock
 
-  let httpPort = 8082
-  putStrLn $ "Listening on port " ++ show httpPort
-  run httpPort (logStdoutDev $ app settings mpdLock dirLock)
+  let settings = ApolloSettings
+        { apolloMpdSettings = MpdSettings
+          { mpdHost = host
+          , mpdPort = port
+          , mpdPassword = pass
+          }
+        , apolloDirLock = dirLock
+        , apolloMpdLock = mpdLock
+        , apolloApiServerSettings = ServerSettings
+          { serverDomain = T.pack apiDomain
+          , serverScheme = T.pack apiScheme
+          , serverPort = apiPort
+          }
+        , apolloStaticServerSettings = ServerSettings
+          { serverDomain = T.pack stDomain
+          , serverScheme = T.pack stScheme
+          , serverPort = stPort
+          }
+        }
 
-app :: MpdSettings -> MpdLock -> DirLock -> Application
-app mpdSettings mpdLock dirLock = serve api server' where
+  let httpPort = read p :: Int
+  putStrLn $ "Listening on port " ++ show httpPort
+  run httpPort (logStdoutDev $ app settings)
+
+app :: ApolloSettings -> Application
+app settings = serve api server' where
   api :: Proxy ApolloApi
   api = Proxy
 
@@ -50,9 +70,7 @@ app mpdSettings mpdLock dirLock = serve api server' where
   server' = enter nat server
 
   nat :: Apollo :~> Handler
-  nat = Nat $
-    (>>= adjust) . liftIO . runApolloIO .
-    interpretApolloIO mpdSettings mpdLock dirLock
+  nat = Nat $ (>>= adjust) . liftIO . runApolloIO . interpretApolloIO settings
 
   adjust :: Either ApolloError a -> Handler a
   adjust m = case m of
