@@ -21,9 +21,11 @@ fi
 
 DBDIR="$1"
 shift
+HTTP_PORT="$1"
+shift
 
 echo $HOST $PORT $PASSWORD
 
 D="$PWD"
 mkdir -p $DBDIR/{music,transcoded,archives}
-(cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD" $@)
+(cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HTTP_PORT" "$HOST" "$PORT" "$PASSWORD" $@)
