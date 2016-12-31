@@ -27,4 +27,3 @@ echo $HOST $PORT $PASSWORD
 D="$PWD"
 mkdir -p $DBDIR/{music,transcoded,archives}
 (cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HOST" "$PORT" "$PASSWORD" $@)
-
