@@ -6,10 +6,12 @@ module Apollo.Server
 ) where
 
 import Apollo.Types
+import Apollo.Background ( JobS(..) )
 import Apollo.Monad ( Apollo )
 import qualified Apollo.Monad as A
 
 import Data.Default.Class ( def )
+import Data.List.NonEmpty ( NonEmpty )
 import Servant
 
 type ApolloServer = ServerT ApolloApi Apollo
@@ -43,13 +45,34 @@ server = topRoutes where
   status :: Apollo PlayerStatus
   status = A.getPlayerStatus
 
-  transcodings = makeTranscode :<|> getTranscode where
+  transcodings = makeTranscode :<|> getTranscode :<|> asyncTranscoding where
     makeTranscode :: TranscodeReq -> Apollo TrackIdW
     makeTranscode TranscodeReq{..} = TrackIdW
       <$> A.transcodeTrack transSource transParams
 
-    getTranscode :: TrackId -> TranscodingParameters -> Apollo LazyTrackData
+    getTranscode
+      :: TrackId
+      -> TranscodingParameters
+      -> Apollo LazyTrackData
     getTranscode = A.readTranscodeLazily
+
+    asyncTranscoding = startAsyncTranscode :<|> checkAsyncTranscode where
+      startAsyncTranscode :: NonEmpty TranscodeReq -> Apollo JobQueueResult
+      startAsyncTranscode reqs = do
+        m <- A.getMusicDir
+        t <- A.getTranscodeDir
+        i <- A.startAsyncJob
+          (BulkS TranscodeS)
+          (m, t)
+          ((\TranscodeReq{..} -> (transSource, transParams)) <$> reqs)
+        url <- A.getApiLink $ apiLink (Proxy :: Proxy QueryAsyncTranscode) i
+        pure JobQueueResult
+          { jobQueueId = i
+          , jobQueueQueryUrl = url
+          }
+
+      checkAsyncTranscode :: JobId -> Apollo JobQueryResult
+      checkAsyncTranscode i = A.queryAsyncJob i (BulkS TranscodeS)
 
   archives = makeArchive :<|> getArchive where
     makeArchive :: [ArchiveEntry] -> Apollo ArchivalResult

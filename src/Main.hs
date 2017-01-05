@@ -9,6 +9,7 @@ import Apollo.Monad
   , runApolloIO
   , makeMpdLock
   , makeDirLock
+  , newJobBankVar
   , ApolloSettings(..)
   , ServerSettings(..)
   , MpdSettings(..)
@@ -36,6 +37,7 @@ main = do
 
   mpdLock <- makeMpdLock
   dirLock <- makeDirLock
+  jobBank <- newJobBankVar
 
   let settings = ApolloSettings
         { apolloMpdSettings = MpdSettings
@@ -45,6 +47,7 @@ main = do
           }
         , apolloDirLock = dirLock
         , apolloMpdLock = mpdLock
+        , apolloJobBank = jobBank
         , apolloApiServerSettings = ServerSettings
           { serverDomain = T.pack apiDomain
           , serverScheme = T.pack apiScheme
@@ -83,6 +86,9 @@ app settings = serve api server' where
           , "and transcoding parameters"
           , show params
           ]
+        }
+      NoSuchJob i -> err404
+        { errBody = lazyEncode "no such job"
         }
     Right x -> pure x
 

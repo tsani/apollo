@@ -1,8 +1,14 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -38,7 +44,16 @@ module Apollo.Types
 , nonZero
 , Url(..)
 , StaticResource(..)
+, JobId(..)
+, JobQueueResult(..)
+, JobQueryResult(..)
+, JobStatus(..)
+, apolloApi
+, apiLink
+, QueryAsyncTranscode
 ) where
+
+import Apollo.Types.Servant
 
 import Data.Aeson
 import Data.ByteString ( ByteString )
@@ -46,16 +61,19 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as C8
 import Data.Default.Class ( Default(..) )
 import Data.List ( intercalate )
+import Data.List.NonEmpty ( NonEmpty )
 import Data.Monoid ( (<>) )
+import Data.Proxy
 import Data.Text ( Text )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
+import Data.Void
 import Data.Word ( Word16 )
 import qualified Network.MPD as MPD
 import Servant.API
-import System.FilePath ( (</>), FilePath )
+import System.FilePath ( FilePath )
 import Text.Read ( readMaybe )
-import Web.HttpApiData ( FromHttpApiData(..) )
+import Web.HttpApiData ( FromHttpApiData(..), ToHttpApiData )
 
 type ApolloApiV1
   =
@@ -80,18 +98,40 @@ type ApolloApiV1
     "transcode" :> (
       ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
     :<|>
-      Capture "trackId" TrackId
-      :> Capture "transcodingParameters" TranscodingParameters
-      :> Get '[OctetStream] LazyTrackData
+      StrictQueryParam "trackId" TrackId
+        :> StrictQueryParam "params" TranscodingParameters
+        :> Get '[OctetStream] LazyTrackData
+    :<|>
+      "async" :> (
+        ReqBody '[JSON] (NonEmpty TranscodeReq)
+          :> Post '[JSON] JobQueueResult
+      :<|>
+        StrictQueryParam "id" JobId
+          :> Get '[JSON] JobQueryResult
+      )
     )
   :<|>
     "archive" :> (
       ReqBody '[JSON] [ArchiveEntry] :> Post '[JSON] ArchivalResult
     :<|>
-      Capture "archiveId" ArchiveId :> Get '[OctetStream] LazyArchiveData
+      StrictQueryParam "id" ArchiveId :> Get '[OctetStream] LazyArchiveData
     )
 
-type ApolloApi = "v1" :> ApolloApiV1
+type V1 = "v1"
+
+type ApolloApi = V1 :> ApolloApiV1
+
+type QueryAsyncTranscode
+  = V1 :> "transcode" :> "async"
+  :> StrictQueryParam "id" JobId :> Get '[JSON] JobQueryResult
+
+-- | A proxy for the Apollo API type.
+apolloApi :: Proxy ApolloApi
+apolloApi = Proxy
+
+-- | A function for generating typesafe links within the API.
+apiLink :: (IsElem e ApolloApi, HasLink e) => Proxy e -> MkLink e
+apiLink = safeLink apolloApi
 
 -- | A request to download audio from an external source using @youtube-dl@.
 -- The resulting tracks will be stored in a given 'MusicDir'.
@@ -167,10 +207,10 @@ data Entry
 instance ToJSON Entry where
   toJSON Entry{..} = String (unMusicDir entryMusicDir <> "/" <> entryName)
 
--- | Converts an entry into a path relative to the music directory.
-entryToPath :: Entry -> FilePath
-entryToPath Entry{..}
-  = T.unpack (unMusicDir entryMusicDir) </> T.unpack entryName
+-- -- | Converts an entry into a path relative to the music directory.
+-- entryToPath :: Entry -> FilePath
+-- entryToPath Entry{..}
+--   = T.unpack (unMusicDir entryMusicDir) </> T.unpack entryName
 
 -- | A URL to be given to @youtube-dl@ for downloading.
 newtype YoutubeDlUrl
@@ -291,9 +331,9 @@ data Quality
   = Q0 | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- | Convert a quality to an integer.
-qualityToInt :: Quality -> Int
-qualityToInt = fromEnum
+-- -- | Convert a quality to an integer.
+-- qualityToInt :: Quality -> Int
+-- qualityToInt = fromEnum
 
 -- | Convert an integer to a quality.
 qualityFromInt :: Int -> Maybe Quality
@@ -505,3 +545,54 @@ newtype Url
     { unUrl :: T.Text
     }
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
+
+newtype JobId = JobId Int
+  deriving
+    ( Eq
+    , Ord
+    , Read
+    , Show
+    , ToJSON
+    , FromJSON
+    , FromHttpApiData
+    , ToHttpApiData
+    )
+
+data JobQueueResult
+  = JobQueueResult
+    { jobQueueId :: JobId
+    , jobQueueQueryUrl :: Url
+    }
+
+instance ToJSON JobQueueResult where
+  toJSON JobQueueResult{..} = object
+    [ "jobId" .= jobQueueId
+    , "query" .= jobQueueQueryUrl
+    ]
+
+data JobStatus p e a
+  = InProgress p
+  | Aborted e
+  | Complete a
+
+data JobQueryResult where
+  JobQueryResult
+    :: (ToJSON p, ToJSON e, ToJSON a) => JobStatus p e a -> JobQueryResult
+
+instance ToJSON JobQueryResult where
+  toJSON (JobQueryResult s) = case s of
+    InProgress p -> object
+      [ "status" .= ("in progress" :: Text)
+      , "progress" .= p
+      ]
+    Aborted e -> object
+      [ "status" .= ("aborted" :: Text)
+      , "error" .= e
+      ]
+    Complete x -> object
+      [ "status" .= ("complete" :: Text)
+      , "result" .= x
+      ]
+
+instance ToJSON Void where
+  toJSON = absurd
