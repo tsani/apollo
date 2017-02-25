@@ -13,11 +13,12 @@ import Data.List ( sort )
 import Data.Text ( pack )
 import Data.Text ( unpack )
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
+import Data.Foldable ( toList )
 import qualified System.Directory as Dir
 import System.FilePath ( (</>) )
 
-makeArchiveId :: [ArchiveEntry] -> ArchiveId
-makeArchiveId (sort -> entries) = ArchiveId h where
+makeArchiveId :: Traversable t => t ArchiveEntry -> ArchiveId
+makeArchiveId (toList -> sort -> entries) = ArchiveId h where
   h = sha1 $ encodeUtf8 $ pack $ show entries
 
 getExistingArchive :: Maybe FilePath -> ArchiveId -> IO (Maybe FilePath)

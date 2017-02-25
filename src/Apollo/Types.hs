@@ -1,20 +1,5 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE ViewPatterns #-}
-
 module Apollo.Types
-( ApolloApi
-, YoutubeDlReq(..)
+( YoutubeDlReq(..)
 , PlaylistItemId(..)
 , MusicDir(..)
 , TrackData(..)
@@ -47,13 +32,11 @@ module Apollo.Types
 , JobId(..)
 , JobQueueResult(..)
 , JobQueryResult(..)
-, JobStatus(..)
-, apolloApi
-, apiLink
-, QueryAsyncTranscode
+, JsonVoid(JsonVoid)
+, module Apollo.Types.Job
 ) where
 
-import Apollo.Types.Servant
+import Apollo.Types.Job
 
 import Data.Aeson
 import Data.ByteString ( ByteString )
@@ -61,9 +44,7 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as C8
 import Data.Default.Class ( Default(..) )
 import Data.List ( intercalate )
-import Data.List.NonEmpty ( NonEmpty )
 import Data.Monoid ( (<>) )
-import Data.Proxy
 import Data.Text ( Text )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
@@ -74,64 +55,6 @@ import Servant.API
 import System.FilePath ( FilePath )
 import Text.Read ( readMaybe )
 import Web.HttpApiData ( FromHttpApiData(..), ToHttpApiData )
-
-type ApolloApiV1
-  =
-    "tracks"
-      :> "add"
-        :> "youtube-dl"
-          :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] [Entry]
-  :<|>
-    "playlist" :> (
-      Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
-    :<|>
-      QueryParam "position" PositionBetweenTracks
-        :> ReqBody '[JSON] [FilePath]
-        :> Put '[JSON] [PlaylistItemId]
-    :<|>
-      Get '[JSON] Playlist
-    )
-  :<|>
-    "status"
-      :> Get '[JSON] PlayerStatus
-  :<|>
-    "transcode" :> (
-      ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
-    :<|>
-      StrictQueryParam "trackId" TrackId
-        :> StrictQueryParam "params" TranscodingParameters
-        :> Get '[OctetStream] LazyTrackData
-    :<|>
-      "async" :> (
-        ReqBody '[JSON] (NonEmpty TranscodeReq)
-          :> Post '[JSON] JobQueueResult
-      :<|>
-        StrictQueryParam "id" JobId
-          :> Get '[JSON] JobQueryResult
-      )
-    )
-  :<|>
-    "archive" :> (
-      ReqBody '[JSON] [ArchiveEntry] :> Post '[JSON] ArchivalResult
-    :<|>
-      StrictQueryParam "id" ArchiveId :> Get '[OctetStream] LazyArchiveData
-    )
-
-type V1 = "v1"
-
-type ApolloApi = V1 :> ApolloApiV1
-
-type QueryAsyncTranscode
-  = V1 :> "transcode" :> "async"
-  :> StrictQueryParam "id" JobId :> Get '[JSON] JobQueryResult
-
--- | A proxy for the Apollo API type.
-apolloApi :: Proxy ApolloApi
-apolloApi = Proxy
-
--- | A function for generating typesafe links within the API.
-apiLink :: (IsElem e ApolloApi, HasLink e) => Proxy e -> MkLink e
-apiLink = safeLink apolloApi
 
 -- | A request to download audio from an external source using @youtube-dl@.
 -- The resulting tracks will be stored in a given 'MusicDir'.
@@ -272,6 +195,12 @@ data TranscodingParameters
     }
   deriving (Eq, Ord, Read, Show)
 
+instance ToJSON TranscodingParameters where
+  toJSON TranscodingParameters{..} = object
+    [ "format" .= transFormat
+    , "bitrate" .= transBitrate
+    ]
+
 instance FromJSON TranscodingParameters where
   parseJSON (Object o) = TranscodingParameters
     <$> o .: "format"
@@ -312,6 +241,10 @@ data Format
   = Mp3
   deriving (Eq, Ord, Read, Show)
 
+instance ToJSON Format where
+  toJSON = \case
+    Mp3 -> String "mp3"
+
 instance FromJSON Format where
   parseJSON (String s) = case s of
     "mp3" -> pure Mp3
@@ -331,9 +264,9 @@ data Quality
   = Q0 | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
--- -- | Convert a quality to an integer.
--- qualityToInt :: Quality -> Int
--- qualityToInt = fromEnum
+-- | Convert a quality to an integer.
+qualityToInt :: Quality -> Int
+qualityToInt = fromEnum
 
 -- | Convert an integer to a quality.
 qualityFromInt :: Int -> Maybe Quality
@@ -342,6 +275,17 @@ qualityFromInt n
   | otherwise = Nothing where
     minB = fromEnum (minBound :: Quality)
     maxB = fromEnum (maxBound :: Quality)
+
+instance ToJSON Bitrate where
+  toJSON = \case
+    CBR x -> object
+      [ "type" .= id @Text "cbr"
+      , "value" .= x
+      ]
+    VBR x -> object
+      [ "type" .= id @Text "vbr"
+      , "value" .= qualityToInt x
+      ]
 
 instance FromJSON Bitrate where
   parseJSON (Object o) = do
@@ -552,11 +496,23 @@ newtype JobId = JobId Int
     , Ord
     , Read
     , Show
-    , ToJSON
-    , FromJSON
+    , Enum
     , FromHttpApiData
     , ToHttpApiData
     )
+
+instance ToJSON JobId where
+  toJSON (JobId n) = toJSON (show n)
+
+instance FromJSON JobId where
+  parseJSON (String s) = case readMaybe (T.unpack s) of
+    Just x -> pure x
+    Nothing -> fail "failed to parse JobId"
+  parseJSON _ = fail "cannot parse JobId from non-string"
+
+instance Bounded JobId where
+  minBound = JobId 0
+  maxBound = JobId maxBound
 
 data JobQueueResult
   = JobQueueResult
@@ -570,29 +526,32 @@ instance ToJSON JobQueueResult where
     , "query" .= jobQueueQueryUrl
     ]
 
-data JobStatus p e a
-  = InProgress p
-  | Aborted e
-  | Complete a
+newtype JobQueryResult e r = JobQueryResult (JobInfo e r)
 
-data JobQueryResult where
-  JobQueryResult
-    :: (ToJSON p, ToJSON e, ToJSON a) => JobStatus p e a -> JobQueryResult
-
-instance ToJSON JobQueryResult where
+instance (ToJSON e, ToJSON r) => ToJSON (JobQueryResult e r) where
   toJSON (JobQueryResult s) = case s of
-    InProgress p -> object
-      [ "status" .= ("in progress" :: Text)
-      , "progress" .= p
+    JobInProgress p -> object
+      [ "status" .= ("running" :: Text)
+      , "progress" .= JsonJobProgress p
       ]
-    Aborted e -> object
-      [ "status" .= ("aborted" :: Text)
+    JobFailed e -> object
+      [ "status" .= ("failed" :: Text)
       , "error" .= e
       ]
-    Complete x -> object
+    JobComplete x -> object
       [ "status" .= ("complete" :: Text)
       , "result" .= x
       ]
 
-instance ToJSON Void where
-  toJSON = absurd
+newtype JsonJobProgress = JsonJobProgress Progress
+
+instance ToJSON JsonJobProgress where
+  toJSON (JsonJobProgress (Progress n d)) = object
+    [ "done" .= n
+    , "outOf" .= d
+    ]
+
+newtype JsonVoid = JsonVoid Void
+
+instance ToJSON JsonVoid where
+  toJSON (JsonVoid v) = absurd v

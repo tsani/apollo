@@ -3,21 +3,18 @@
  - The apollo monad is a free monad with a few very high-level actions.
  -}
 
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module Apollo.Monad
 ( -- * Apollo monad
   ApolloF(..)
 , Apollo
+  -- ** Interpreters
+, runApollo'
+, runApollo
+, ApolloIO
+, runApolloIO
+, ApolloError(..)
   -- ** Actions
 , youtubeDl
 , getPlayerStatus
@@ -35,11 +32,11 @@ module Apollo.Monad
 , queryAsyncJob
 , getMusicDir
 , getTranscodeDir
-  -- ** Interpreters
-, interpretApolloIO
-, ApolloIO
-, runApolloIO
-, ApolloError(..)
+, getArchiveDir
+  -- ** Derived actions
+, forUpdateLen
+, forUpdate
+, startBatchAsyncJob
   -- * Misc
 , ApolloSettings(..)
 , ServerSettings(..)
@@ -48,11 +45,12 @@ module Apollo.Monad
 , MpdLock
 , makeDirLock
 , makeMpdLock
-, newJobBankVar
+, doTranscode
+, doMakeArchive
 ) where
 
 import Apollo.Archive
-import Apollo.Background
+import Apollo.Types.Job
 import Apollo.Monad.Types
 import Apollo.Transcoding
 import Apollo.Track
@@ -60,13 +58,14 @@ import Apollo.Types
 import qualified Apollo.YoutubeDl as Y
 
 import qualified Codec.Archive.Zip as Zip
+import Control.Concurrent.MVar
 import Control.Monad ( foldM, forM_ )
 import Control.Monad.Free
 import Control.Monad.Except
-import Data.Aeson ( ToJSON )
 import qualified Data.Binary as Bin
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
+import Data.IORef
 import Data.Foldable ( for_ )
 import Data.Maybe ( fromJust )
 import Data.Monoid ( (<>) )
@@ -92,12 +91,25 @@ unsafeSongToPlaylistEntry MPD.Song{..} = PlaylistEntry
   , entryDuration = Seconds sgLength
   }
 
-runApolloIO :: ApolloIO a -> IO (Either ApolloError a)
+-- | Interpret an @Apollo@ action directly to @IO@.
+runApollo'
+  :: (Bounded k, Ord k, Enum k)
+  => ApolloSettings k e r
+  -> Apollo k e r a
+  -> IO (Either (ApolloError k) a)
+runApollo' s = runApolloIO . runApollo s
+
+-- | Interpret the intermediate @ApolloIO@ to true @IO@.
+runApolloIO :: ApolloIO k a -> IO (Either (ApolloError k) a)
 runApolloIO = runExceptT . unApolloIO
 
--- | Execute apollo actions in the IO monad, with some distinguished errors.
-interpretApolloIO :: ApolloSettings -> Apollo a -> ApolloIO a
-interpretApolloIO ApolloSettings{..} = iterM phi where
+-- | Interpret the base @Apollo@ action into an @ApolloIO@.
+runApollo
+  :: forall k e r a. (Bounded k, Ord k, Enum k)
+  => ApolloSettings k e r
+  -> Apollo k e r a
+  -> ApolloIO k a
+runApollo ApolloSettings{..} = iterM phi where
   MpdSettings{..} = apolloMpdSettings
 
   runMpd = MPD.withMPDEx mpdHost mpdPort mpdPassword
@@ -112,16 +124,29 @@ interpretApolloIO ApolloSettings{..} = iterM phi where
   transcodeDirP = "transcoded"
   archiveDirP = "archives"
 
-  queueJobApollo
-    :: (RunnableJob j, ToJSON (Result j), ToJSON (UserError j))
-    => JobS j
-    -> Env j
-    -> Params j
-    -> IO JobId
-  queueJobApollo j e p = queueJob j e p apolloJobBank
+  withTempDirectory'
+    :: String
+    -> String
+    -> (FilePath -> ApolloIO k b)
+    -> ApolloIO k b
+  withTempDirectory' x y action =
+    ApolloIO $ ExceptT $ withTempDirectory x y (runExceptT . unApolloIO . action)
 
-  queryJobApollo :: JobId -> JobS j -> IO (Maybe SomeJobStatus)
-  queryJobApollo i j = queryJob i j apolloJobBank
+  withDirLock' :: ApolloIO k' b -> ApolloIO k' b
+  withDirLock' = ApolloIO . ExceptT . withDirLock apolloDirLock . runApolloIO
+
+  withMpdLock' :: ApolloIO k' b -> ApolloIO k' b
+  withMpdLock' = ApolloIO . ExceptT . withMpdLock apolloMpdLock . runApolloIO
+
+  withCwd :: FilePath -> ApolloIO k' b -> ApolloIO k' b
+  withCwd d = ApolloIO . ExceptT . Dir.withCurrentDirectory d . runApolloIO
+
+  withJobBank
+    :: (JobBank k e r -> ApolloIO k (JobBank k e r, b))
+    -> ApolloIO k b
+  withJobBank f = ApolloIO . ExceptT $ do
+    modifyMVar apolloJobBank $ \j -> do
+      either ((j,) . Left) (Right <$>) <$> runApolloIO (f j)
 
   inDir d action = withDirLock' $ withCwd d $ do
     liftIO $ putStrLn $ "cwd -> " ++ d
@@ -130,20 +155,15 @@ interpretApolloIO ApolloSettings{..} = iterM phi where
     pure x
   inMusicDir = inDir musicDirP
 
-  withTempDirectory' :: String -> String -> (FilePath -> ApolloIO a) -> ApolloIO a
-  withTempDirectory' x y action =
-    ApolloIO $ ExceptT $ withTempDirectory x y (runExceptT . unApolloIO . action)
+  queueJob :: Progress -> Job e r -> ApolloIO k k
+  queueJob p j = withJobBank $ \b -> liftIO (startJob p b j)
 
-  withDirLock' :: ApolloIO a -> ApolloIO a
-  withDirLock' = ApolloIO . ExceptT . withDirLock apolloDirLock . runExceptT . unApolloIO
+  queryJob :: k -> ApolloIO k (JobInfo e r)
+  queryJob i = withJobBank $ \b -> liftIO (checkJob i b) >>= \case
+    Nothing -> throwError (NoSuchJob i)
+    Just x -> pure x
 
-  withMpdLock' :: ApolloIO a -> ApolloIO a
-  withMpdLock' = ApolloIO . ExceptT . withMpdLock apolloMpdLock . runExceptT . unApolloIO
-
-  withCwd :: FilePath -> ApolloIO a -> ApolloIO a
-  withCwd d = ApolloIO . ExceptT . Dir.withCurrentDirectory d . runExceptT . unApolloIO
-
-  phi :: ApolloF (ApolloIO a) -> ApolloIO a
+  phi :: forall a'. ApolloF k e r (ApolloIO k a') -> ApolloIO k a'
   phi = \case
     YoutubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) k -> do
       let dp = T.unpack musicDirT
@@ -209,10 +229,8 @@ interpretApolloIO ApolloSettings{..} = iterM phi where
         , playlistNowPlaying = st >>= (\(MPD.Id i) -> pure $ PlaylistItemId i)
         }
 
-    Transcode track params k -> do
-      let e = (musicDirP, transcodeDirP)
-      let p = (track, params)
-      k =<< liftIO (runJobDefaultEx (job (proxy TranscodeS)) e p)
+    Transcode track params k ->
+      k =<< liftIO (doTranscode musicDirP transcodeDirP track params)
 
     ReadTrackLazily track k
       -> k =<< (liftIO $ readTrackLazilyIO (musicDirP </> track))
@@ -229,30 +247,11 @@ interpretApolloIO ApolloSettings{..} = iterM phi where
       in k =<< (liftIO $ readArchiveLazilyIO (archiveDirP </> p))
 
     MakeArchive entries k -> do
-      let archiveId@(ArchiveId (Sha1Hash idB)) = makeArchiveId entries
-
-      liftIO (getExistingArchive (Just archiveDirP) archiveId) >>= \case
-        Just _ -> pure ()
-        Nothing -> do
-          let forFoldM i xs g = foldM g i xs
-          archive <- forFoldM Zip.emptyArchive entries $ \a e -> do
-            -- compute the path to read from, and the path to put in the archive
-            (srcP, dstP) <- case e of
-              ArchiveTrack p -> pure (musicDirP </> p, "raw" </> p)
-              ArchiveTranscode tid params -> do
-                m <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
-                p <- maybe (throwError $ NoSuchTranscode tid params) pure m
-                pure (p, "transcoded" </> transcodeDirectoryFor tid params)
-            let opts = [Zip.OptVerbose, Zip.OptLocation dstP False]
-            liftIO $ Zip.addFilesToArchive opts a [srcP]
-
-          let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
-          let utf8str = encodeUtf8 . T.pack
-          liftIO $ Bin.encodeFile
-            archivePath
-            archive { Zip.zComment = LBS.fromStrict (utf8str "Apollo archive " <> idB) }
-
-      k archiveId
+      m <- liftIO $ runJob $
+        doMakeArchive musicDirP transcodeDirP archiveDirP entries
+      case m of
+        Left e -> throwError e
+        Right i -> k i
 
     GetStaticUrl res k -> (>>= k) $ case res of
       StaticArchive (ArchiveId (Sha1Hash b)) -> do
@@ -262,20 +261,84 @@ interpretApolloIO ApolloSettings{..} = iterM phi where
       StaticTrack p -> error "StaticTrack" p
 
     GetApiLink u k -> do
+      let f = ('/' :)
       let sc = T.unpack (serverScheme apolloApiServerSettings) ++ ":"
       let d = T.unpack (serverDomain apolloApiServerSettings)
-      let auth = Just URIAuth { uriUserInfo = "", uriRegName = d, uriPort = "" }
-      let uri = u { uriScheme = sc, uriAuthority = auth }
+      let p = ":" ++ show (serverPort apolloApiServerSettings)
+      let auth = Just URIAuth { uriUserInfo = "", uriRegName = d, uriPort = p }
+      let uri = u { uriScheme = sc, uriAuthority = auth, uriPath = f $ uriPath u }
       let s = uriToString id uri ""
       k (Url (T.pack s))
 
-    StartAsyncJob j e p k -> k =<< liftIO (queueJobApollo j e p)
+    StartAsyncJob p j k -> k =<< queueJob p j
 
-    QueryAsyncJob i j k -> do
-      m <- liftIO $ queryJobApollo i j
-      SomeJobStatus _ s <- maybe (throwError $ NoSuchJob i) pure m
-      k (JobQueryResult s)
+    QueryAsyncJob i k -> k =<< queryJob i
 
     GetMusicDir k -> k musicDirP
 
     GetTranscodeDir k -> k transcodeDirP
+
+    GetArchiveDir k -> k archiveDirP
+
+doTranscode
+  :: FilePath -- ^ music dir
+  -> FilePath -- ^ transcode dir
+  -> FilePath -- ^ track path
+  -> TranscodingParameters -> IO TrackId
+doTranscode musicDirP transcodeDirP track params = do
+  d <- readTrackIO (musicDirP </> track)
+  let tid = trackId d
+  putStrLn $ "computed track ID " ++ show tid
+  mp <- getExistingTranscode (Just transcodeDirP) tid params
+  putStrLn "got existing transcode"
+  _ <- case mp of
+    Just transcodePath -> pure (transcodeDirP </> transcodePath)
+      -- then the transcode exists, so no work to do.
+    Nothing -> do -- no transcode exists, so we have to make one
+      let dir = transcodeDirectoryFor tid params
+      Dir.createDirectoryIfMissing True (transcodeDirP </> dir)
+      transcode (musicDirP </> track) (transcodeDirP </> dir) params
+  pure tid
+
+doMakeArchive
+  :: Traversable t
+  => FilePath -- ^ music dir
+  -> FilePath -- ^ transcode dir
+  -> FilePath -- ^ archive dir
+  -> t ArchiveEntry
+  -> Job (ApolloError k) ArchiveId
+doMakeArchive musicDirP transcodeDirP archiveDirP entries = do
+  let archiveId@(ArchiveId (Sha1Hash idB)) = makeArchiveId entries
+  let getExisting = getExistingArchive (Just archiveDirP) archiveId
+  let l = length entries
+
+  v <- liftIO (newIORef 0)
+
+  liftIO getExisting >>= \case
+    Just _ -> pure () -- archive already exists; nothing to do
+    Nothing -> do
+      let forFoldM i xs g = foldM g i xs
+      archive <- forFoldM Zip.emptyArchive entries $ \a e -> do
+        -- compute the path to read from, and the path to put in the archive
+        (srcP, dstP) <- case e of
+          ArchiveTrack p -> pure (musicDirP </> p, "raw" </> p)
+          ArchiveTranscode tid params -> do
+            m <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
+            p <- maybe (jobError $ NoSuchTranscode tid params) pure m
+            pure (p, "transcoded" </> transcodeDirectoryFor tid params)
+
+        i <- liftIO $ atomicModifyIORef v (\i -> (i + 1, i))
+        reportProgress (Progress i l)
+
+        let opts = [Zip.OptVerbose, Zip.OptLocation dstP False]
+        liftIO $ Zip.addFilesToArchive opts a [srcP]
+
+      let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
+      let utf8str = encodeUtf8 . T.pack
+      liftIO $ Bin.encodeFile
+        archivePath
+        archive
+          { Zip.zComment = LBS.fromStrict (utf8str "Apollo archive " <> idB)
+          }
+
+  pure archiveId

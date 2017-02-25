@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeOperators #-}
 
-module Main where
+module Main ( main ) where
 
 import Apollo.Server
 import Apollo.Monad
@@ -9,19 +9,17 @@ import Apollo.Monad
   , runApolloIO
   , makeMpdLock
   , makeDirLock
-  , newJobBankVar
   , ApolloSettings(..)
   , ServerSettings(..)
   , MpdSettings(..)
-  , interpretApolloIO
+  , runApollo
   )
+import Apollo.Types
 
 import Control.Category ( (.) )
 import Control.Monad.IO.Class ( liftIO )
-import Data.ByteString.Lazy ( fromStrict )
-import Data.List ( intercalate )
+import Data.Aeson ( encode )
 import qualified Data.Text as T
-import Data.Text.Encoding ( encodeUtf8 )
 import Network.Wai ( Application )
 import Network.Wai.Handler.Warp ( run )
 import Network.Wai.Middleware.RequestLogger ( logStdoutDev )
@@ -64,32 +62,22 @@ main = do
   putStrLn $ "Listening on port " ++ show httpPort
   run httpPort (logStdoutDev $ app settings)
 
-app :: ApolloSettings -> Application
+app :: ApolloSettings JobId (ApolloError JobId) AsyncResult -> Application
 app settings = serve api server' where
-  api :: Proxy ApolloApi
+  api :: Proxy (ApolloApi k)
   api = Proxy
 
-  server' :: Server ApolloApi
+  server' :: Server (ApolloApi JobId)
   server' = enter nat server
 
-  nat :: Apollo :~> Handler
-  nat = Nat $ (>>= adjust) . liftIO . runApolloIO . interpretApolloIO settings
+  nat :: Apollo JobId (ApolloError JobId) AsyncResult :~> Handler
+  nat = Nat $ (>>= adjust) . liftIO . runApolloIO . runApollo settings
 
-  adjust :: Either ApolloError a -> Handler a
+  adjust :: Either (ApolloError JobId) a -> Handler a
   adjust m = case m of
     Left e -> throwError $ case e of
-      ApolloMpdError mpdE -> err500 { errBody = lazyEncode $ show mpdE }
-      NoSuchTranscode tid params -> err404
-        { errBody = lazyEncode $ intercalate " "
-          [ "No such transcode with trackId"
-          , show tid
-          , "and transcoding parameters"
-          , show params
-          ]
-        }
-      NoSuchJob i -> err404
-        { errBody = lazyEncode "no such job"
-        }
+      ApolloMpdError{} -> err500 { errBody = encode e }
+      NoSuchTranscode{} -> err404 { errBody = encode e }
+      NoSuchJob{} -> err404 { errBody = encode e }
+      WrongAsyncResult{} -> err400 { errBody = encode e }
     Right x -> pure x
-
-  lazyEncode = fromStrict . encodeUtf8 . T.pack

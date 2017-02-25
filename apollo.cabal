@@ -27,6 +27,29 @@ executable apollo
     ghc-options:
       -O0
 
+  default-extensions:
+    ConstraintKinds
+    DataKinds
+    DeriveFunctor
+    DeriveFoldable
+    DeriveTraversable
+    FlexibleContexts
+    FlexibleInstances
+    GADTs
+    GeneralizedNewtypeDeriving
+    LambdaCase
+    MultiParamTypeClasses
+    OverloadedStrings
+    RankNTypes
+    RecordWildCards
+    ScopedTypeVariables
+    StandaloneDeriving
+    TupleSections
+    TypeApplications
+    TypeFamilies
+    TypeOperators
+    ViewPatterns
+
   build-depends:
     aeson >=1.0 && <1.1,
     async >=2.1 && <2.2,

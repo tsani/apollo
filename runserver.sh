@@ -26,6 +26,14 @@ shift
 
 echo $HOST $PORT $PASSWORD
 
+# note to self: ARGS !!!
+#  1. api scheme
+#  2. api domain
+#  3. api port
+#  4. static scheme
+#  5. static domain
+#  6. static port
+
 D="$PWD"
 mkdir -p $DBDIR/{music,transcoded,archives}
 (cd $DBDIR ; exec "$D/dist/build/apollo/apollo" "$HTTP_PORT" "$HOST" "$PORT" "$PASSWORD" $@)
