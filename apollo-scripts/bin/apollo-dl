@@ -15,6 +15,8 @@ URL=
 CLIPBOARD=0
 ENQUEUE=1
 
+API_VERSION=v1
+
 while (( $# )) ; do
     case "$1" in
         "-c")
@@ -63,18 +65,18 @@ if [ $HASPATH -eq 0 -a $HASURL -eq 0 ] ; then
 fi
 
 post() {
-  curl --fail -H 'Content-type: application/json' --data "$2" \
-    $APOLLO_BASE_URL/v1$1
+  curl --silent --fail -H 'Content-type: application/json' --data "$2" \
+    ${APOLLO_BASE_URL}${API_VERSION}$1
 }
 
 put() {
-  curl -X PUT --fail -H 'Content-type: application/json' --data "$2" \
-    $APOLLO_BASE_URL/v1$1
+  curl --silent -X PUT --fail -H 'Content-type: application/json' --data "$2" \
+    ${APOLLO_BASE_URL}${API_VERSION}$1
 }
 
 if [ $ENQUEUE -eq 1 ] ; then
   enqueue() {
-    put /playlist "$(jq .addedTracks)"
+    put /playlist "$(cat)"
   }
 else
   enqueue() {
