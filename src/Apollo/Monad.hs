@@ -221,6 +221,8 @@ runApollo ApolloSettings{..} = iterM phi where
             PlaylistItemId . (\(MPD.Id i) -> i)
               <$> MPD.addId (fromString track) enqueuePos
 
+      liftIO (putStrLn $ "entries: " ++ show rs)
+
       k rs
 
     DeleteTracks items k -> (k <*) $ runMpdLockedEx $ do
