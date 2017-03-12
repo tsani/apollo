@@ -35,7 +35,7 @@ data ApolloF k e a next where
   YoutubeDl
     :: MusicDir
     -> YoutubeDlUrl
-    -> ([Entry] -> next)
+    -> (NonEmpty Entry -> next)
     -> ApolloF k e a next
   -- | Gets the playback status.
   GetPlayerStatus
@@ -45,8 +45,8 @@ data ApolloF k e a next where
   -- if any.
   EnqueueTracks
     :: PositionBetweenTracks
-    -> [FilePath]
-    -> ([PlaylistItemId] -> next)
+    -> (NonEmpty FilePath)
+    -> ((NonEmpty PlaylistItemId) -> next)
     -> ApolloF k e a next
   -- | Deletes the given tracks from the playlist.
   DeleteTracks
@@ -123,7 +123,7 @@ deriving instance Functor (ApolloF k e a)
 type Apollo k e a = Free (ApolloF k e a)
 
 -- | See 'YoutubeDl'.
-youtubeDl :: MusicDir -> YoutubeDlUrl -> Apollo k e a [Entry]
+youtubeDl :: MusicDir -> YoutubeDlUrl -> Apollo k e a (NonEmpty Entry)
 youtubeDl x y = liftF $ YoutubeDl x y id
 
 -- | See 'GetPlayerStatus'.
@@ -133,8 +133,8 @@ getPlayerStatus = liftF $ GetPlayerStatus id
 -- | See 'EnqueueTracks'.
 enqueueTracks
   :: PositionBetweenTracks
-  -> [FilePath]
-  -> Apollo k e a [PlaylistItemId]
+  -> (NonEmpty FilePath)
+  -> Apollo k e a (NonEmpty PlaylistItemId)
 enqueueTracks pos tracks = liftF $ EnqueueTracks pos tracks id
 
 -- | See 'DeleteTracks'.
@@ -305,12 +305,18 @@ data ApolloSettings k e a
 -- | Errors that can arise during the IO interpretation of the 'Apollo' monad,
 -- 'runApolloIO'.
 data ApolloError k
+  -- | When an internal MPD error occurs, we just forward it along.
   = ApolloMpdError MpdError
+  -- | A transcode was requested, but it could not be located.
   | NoSuchTranscode TrackId TranscodingParameters
+  -- | A job was requested, but it could not be located.
   | NoSuchJob k
+  -- | An async result was found, but it was of the wrong type.
   | WrongAsyncResult
-    String -- ^ expected
-    String -- ^ actual
+    String -- ^ expected type
+    String -- ^ actual type
+  -- | A youtube-dl subprocess produced no output files.
+  | EmptyYoutubeDlResult
 
 instance ToJSON k => ToJSON (ApolloError k) where
   toJSON = \case
@@ -335,6 +341,11 @@ instance ToJSON k => ToJSON (ApolloError k) where
       , "message" .= (id @Text "an async job completed with an unexpected type")
       , "expected" .= expected
       , "actual" .= actual
+      ]
+
+    EmptyYoutubeDlResult -> object
+      [ "type" .= id @Text "empty youtube-dl result"
+      , "message" .= id @Text "youtube-dl subprocess produced no output files"
       ]
 
 -- | Result of 'runApolloIO'. This is just an IO monad with some

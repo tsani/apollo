@@ -80,4 +80,5 @@ app settings = serve api server' where
       NoSuchTranscode{} -> err404 { errBody = encode e }
       NoSuchJob{} -> err404 { errBody = encode e }
       WrongAsyncResult{} -> err400 { errBody = encode e }
+      EmptyYoutubeDlResult{} -> err500 { errBody = encode e }
     Right x -> pure x

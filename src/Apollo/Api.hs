@@ -14,15 +14,25 @@ type ApolloApiV1 k
   =
     "tracks"
       :> "add"
-        :> "youtube-dl"
-          :> ReqBody '[JSON] YoutubeDlReq :> Post '[JSON] [Entry]
+        :> "youtube-dl" :> (
+          ReqBody '[JSON] YoutubeDlReq
+            :> Post '[JSON] (NonEmpty Entry)
+        :<|>
+          "async" :> (
+            ReqBody '[JSON] YoutubeDlReq
+              :> Post '[JSON] JobQueueResult
+          :<|>
+            StrictQueryParam "id" k
+              :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))
+        )
+      )
   :<|>
     "playlist" :> (
       Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
     :<|>
       QueryParam "position" PositionBetweenTracks
-        :> ReqBody '[JSON] [FilePath]
-        :> Put '[JSON] [PlaylistItemId]
+        :> ReqBody '[JSON] (NonEmpty FilePath)
+        :> Put '[JSON] (NonEmpty PlaylistItemId)
     :<|>
       Get '[JSON] Playlist
     )
@@ -110,3 +120,11 @@ type QueryAsyncTest k
   :> "test_async"
   :> Capture "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) Foo)
+
+type QueryAsyncYoutubeDl k
+  = V1
+  :> "tracks"
+  :> "add"
+  :> "youtube-dl"
+  :> StrictQueryParam "id" k
+  :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))

@@ -38,8 +38,22 @@ server = topRoutes where
     :<|> archives
     :<|> testAsync
 
-  download :: YoutubeDlReq -> Apollo JobId e AsyncResult [Entry]
-  download YoutubeDlReq{..} = A.youtubeDl downloadPath downloadUrl
+  download = youtubeDlSync :<|> youtubeDlAsync where
+    youtubeDlSync :: YoutubeDlReq -> Apollo JobId e AsyncResult (NonEmpty Entry)
+    youtubeDlSync YoutubeDlReq{..} = A.youtubeDl downloadPath downloadUrl
+
+    youtubeDlAsync = make :<|> check where
+      make :: YoutubeDlReq -> Apollo JobId e AsyncResult JobQueueResult
+      make = error "youtube-dl async not implemented"
+
+      check
+        :: JobId
+        -> Apollo
+          JobId
+          e
+          AsyncResult
+          (JobQueryResult (ApolloError JobId) (NonEmpty Entry))
+      check = error "youtube-dl async not implemented"
 
   playlist = deleteTracks :<|> enqueueTracks :<|> getPlaylist where
     deleteTracks :: [PlaylistItemId] -> Apollo JobId e AsyncResult Playlist
@@ -47,10 +61,9 @@ server = topRoutes where
 
     enqueueTracks
       :: Maybe PositionBetweenTracks
-      -> [FilePath]
-      -> Apollo JobId e AsyncResult [PlaylistItemId]
-    enqueueTracks Nothing = A.enqueueTracks def
-    enqueueTracks (Just pos) = A.enqueueTracks pos
+      -> (NonEmpty FilePath)
+      -> Apollo JobId e AsyncResult (NonEmpty PlaylistItemId)
+    enqueueTracks p = A.enqueueTracks (maybe def id p)
 
     getPlaylist :: Apollo JobId e AsyncResult Playlist
     getPlaylist = A.getPlaylist

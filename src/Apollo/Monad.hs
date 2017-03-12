@@ -67,6 +67,7 @@ import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
 import Data.IORef
 import Data.Foldable ( for_ )
+import qualified Data.List.NonEmpty as N
 import Data.Maybe ( fromJust )
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
@@ -171,9 +172,11 @@ runApollo ApolloSettings{..} = iterM phi where
 
       entries <- withTempDirectory' "/tmp" "apollo." $ \dirPath -> do
         outputFiles <- withDirLock' $ do
-          withCwd dirPath $ liftIO $ do
-            Y.youtubeDl url
-            Dir.listDirectory "."
+          withCwd dirPath $ do
+            xs <- liftIO $ do
+              Y.youtubeDl url
+              Dir.listDirectory "."
+            maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
         inMusicDir $ liftIO $ do
           Dir.createDirectoryIfMissing True dp
@@ -208,13 +211,16 @@ runApollo ApolloSettings{..} = iterM phi where
           FromEnd (nonZero -> n) -> do
             l <- fromIntegral . MPD.stPlaylistLength <$> MPD.status
             pure $ Just $ if n < 0 then l + n else l
-          FromPlaying (nonZero -> n) ->
+          FromPlaying (nonZero -> n) -> do
             fmap (if n < 0 then (+ (n+1)) else (+ n)) . MPD.stSongPos <$> MPD.status
 
-        for (reverse tracks) $
+        liftIO (putStrLn $ "current song pos: " ++ show enqueuePos)
+
+        for (N.reverse tracks) $
           \track ->
             PlaylistItemId . (\(MPD.Id i) -> i)
               <$> MPD.addId (fromString track) enqueuePos
+
       k rs
 
     DeleteTracks items k -> (k <*) $ runMpdLockedEx $ do
