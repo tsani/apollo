@@ -52,6 +52,7 @@ module Apollo.Monad
 import Apollo.Archive
 import Apollo.Types.Job
 import Apollo.Monad.Types
+import Apollo.Misc ( (<#>), untilM )
 import Apollo.Transcoding
 import Apollo.Track
 import Apollo.Types
@@ -164,6 +165,17 @@ runApollo ApolloSettings{..} = iterM phi where
     Nothing -> throwError (NoSuchJob i)
     Just x -> pure x
 
+  -- | Runs an MPD database update and polls the daemon until it completes.
+  updateDB :: Maybe MPD.Path -> ApolloIO k ()
+  updateDB p = do
+    j <- runMpdLockedEx $ MPD.update p
+    -- loop until we discover that either our job isn't running, or that a
+    -- different update job is running
+    untilM $ runMpdLockedEx $ MPD.status <#> \MPD.Status{..} ->
+      case stUpdatingDb of
+        Just j' -> j' /= j
+        Nothing -> True
+
   phi :: forall a'. ApolloF k e r (ApolloIO k a') -> ApolloIO k a'
   phi = \case
     YoutubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) k -> do
@@ -184,6 +196,10 @@ runApollo ApolloSettings{..} = iterM phi where
             Dir.copyFile (dirPath </> outputFile) (dp </> outputFile)
 
         pure (Entry musicDir . T.pack <$> outputFiles)
+
+      let musicDirS = T.unpack musicDirT
+      liftIO (putStrLn $ "updating MPD database in " ++ musicDirS)
+      updateDB (Just $ fromString musicDirS)
 
       k entries
 
