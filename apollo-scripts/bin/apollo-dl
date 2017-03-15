@@ -74,6 +74,11 @@ put() {
     ${APOLLO_BASE_URL}${API_VERSION}$1
 }
 
+put_() {
+  curl -v -X PUT --fail -H 'Content-type: application/json' --data "$2" \
+    ${APOLLO_BASE_URL}${API_VERSION}$1
+}
+
 if [ $ENQUEUE -eq 1 ] ; then
   enqueue() {
     put /playlist "$(cat)"
