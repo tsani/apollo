@@ -232,7 +232,7 @@ runApollo ApolloSettings{..} = iterM phi where
 
         liftIO (putStrLn $ "current song pos: " ++ show enqueuePos)
 
-        for (N.reverse tracks) $
+        for tracks $
           \track ->
             PlaylistItemId . (\(MPD.Id i) -> i)
               <$> MPD.addId (fromString track) enqueuePos
