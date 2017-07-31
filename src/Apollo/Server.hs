@@ -94,7 +94,7 @@ server = topRoutes where
         i <- A.startBatchAsyncJob reqs $ do
           AsyncTranscodeResult <$> A.forUpdate reqs (liftIO . f)
 
-        url <- A.getApiLink $
+        url <- A.getApiLink $ linkURI $
           apiLink' (Proxy :: Proxy (QueryAsyncTranscode JobId)) i
 
         pure JobQueueResult
@@ -147,7 +147,7 @@ server = topRoutes where
           AsyncArchiveResult <$> A.doMakeArchive md td ad entries
 
         url <- A.getApiLink $
-          apiLink'
+          linkURI $ apiLink'
             (Proxy @(QueryAsyncArchive JobId))
             i
 
@@ -200,7 +200,7 @@ server = topRoutes where
         -- the result of the async job is just whatever's in the variable
         AsyncTestResult <$> liftIO (readIORef v)
 
-      url <- A.getApiLink $
+      url <- A.getApiLink $ linkURI $
         apiLink'
           (Proxy @(QueryAsyncTest JobId))
           i

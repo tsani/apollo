@@ -71,7 +71,7 @@ app settings = serve api server' where
   server' = enter nat server
 
   nat :: Apollo JobId (ApolloError JobId) AsyncResult :~> Handler
-  nat = Nat $ (>>= adjust) . liftIO . runApolloIO . runApollo settings
+  nat = NT $ (>>= adjust) . liftIO . runApolloIO . runApollo settings
 
   adjust :: Either (ApolloError JobId) a -> Handler a
   adjust m = case m of

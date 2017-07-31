@@ -22,10 +22,27 @@ executable apollo
   ghc-options:
     -Wall
     -fprof-auto
+    -fprint-expanded-synonyms
 
   if flag(debug)
     ghc-options:
       -O0
+
+  other-modules:
+    Apollo.Api,
+    Apollo.Archive,
+    Apollo.Crypto,
+    Apollo.Misc,
+    Apollo.Monad,
+    Apollo.Monad.Types,
+    Apollo.Reflection,
+    Apollo.Server,
+    Apollo.Track,
+    Apollo.Transcoding,
+    Apollo.Types,
+    Apollo.Types.Job,
+    Apollo.Types.Servant,
+    Apollo.YoutubeDl
 
   default-extensions:
     ConstraintKinds
@@ -65,8 +82,8 @@ executable apollo
     http-api-data >=0.3 && <0.4,
     http-types >=0.9 && <0.10,
     libmpd >=0.9 && <0.10,
-    servant >=0.9 && <0.12,
-    servant-server >=0.9 && <0.12,
+    servant >=0.11 && <0.12,
+    servant-server >=0.11 && <0.12,
     mtl >=2.2 && <2.3,
     network-uri >=2.6 && <2.7,
     process >=1.4 && <1.5,
