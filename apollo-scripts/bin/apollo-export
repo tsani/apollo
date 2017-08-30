@@ -34,7 +34,7 @@ get() {
 
 post() {
   # echo "POST $1" >&2
-  curl --fail -H 'Content-type: application/json' --data "$2" --silent $URL$1
+  curl --fail -H 'Content-type: application/json' --data @<(echo "$2") --silent $URL$1
 }
 
 PLAYLIST="$(mktemp)"
