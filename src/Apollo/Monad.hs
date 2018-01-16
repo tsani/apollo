@@ -114,8 +114,10 @@ runApollo
 runApollo ApolloSettings{..} = iterM phi where
   MpdSettings{..} = apolloMpdSettings
 
+  runMpd :: MPD.MPD b -> IO (MPD.Response b)
   runMpd = MPD.withMPDEx mpdHost mpdPort mpdPassword
 
+  runMpdLockedEx :: MPD.MPD b -> ApolloIO k' b
   runMpdLockedEx action = withMpdLock' $ do
     r <- liftIO $ runMpd action
     case r of
