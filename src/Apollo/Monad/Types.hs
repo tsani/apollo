@@ -10,6 +10,7 @@
 module Apollo.Monad.Types where
 
 import Apollo.Types
+import Apollo.YoutubeDl
 
 import Control.Concurrent.MVar
 import Control.Monad.Free
@@ -35,6 +36,7 @@ data ApolloF k e a next where
   YoutubeDl
     :: MusicDir
     -> YoutubeDlUrl
+    -> YoutubeDlSettings
     -> (NonEmpty Entry -> next)
     -> ApolloF k e a next
   -- | Gets the playback status.
@@ -123,8 +125,8 @@ deriving instance Functor (ApolloF k e a)
 type Apollo k e a = Free (ApolloF k e a)
 
 -- | See 'YoutubeDl'.
-youtubeDl :: MusicDir -> YoutubeDlUrl -> Apollo k e a (NonEmpty Entry)
-youtubeDl x y = liftF $ YoutubeDl x y id
+youtubeDl :: MusicDir -> YoutubeDlUrl -> YoutubeDlSettings -> Apollo k e a (NonEmpty Entry)
+youtubeDl x y s = liftF $ YoutubeDl x y s id
 
 -- | See 'GetPlayerStatus'.
 getPlayerStatus :: Apollo k e a PlayerStatus

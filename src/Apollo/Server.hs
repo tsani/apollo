@@ -11,6 +11,7 @@ import Apollo.Misc
 import Apollo.Monad ( Apollo, ApolloError )
 import qualified Apollo.Monad as A
 import Apollo.Types
+import Apollo.YoutubeDl ( defaultYoutubeDlSettings, YoutubeDlSettings(..) )
 
 import Control.Concurrent ( threadDelay )
 import Control.Monad.IO.Class ( liftIO )
@@ -39,11 +40,29 @@ server = topRoutes where
     :<|> testAsync
 
   download = youtubeDlSync :<|> youtubeDlAsync where
-    youtubeDlSync :: YoutubeDlReq -> Apollo JobId e AsyncResult (NonEmpty Entry)
-    youtubeDlSync YoutubeDlReq{..} = A.youtubeDl downloadPath downloadUrl
+    youtubeDlSync
+      :: YoutubeDlReq
+      -> Maybe Bool -- ^ ignore 404
+      -> Maybe Bool -- ^ extract audio
+      -> Maybe Bool -- ^ add metadata
+      -> Maybe String -- ^ audio format
+      -> Apollo JobId e AsyncResult (NonEmpty Entry)
+    youtubeDlSync YoutubeDlReq{..} m404 maudio mmeta mfmt =
+      A.youtubeDl downloadPath downloadUrl settings where
+        settings = a404 . aaudio . ameta . afmt $ defaultYoutubeDlSettings
+        a404 = maybe id (\x s -> s { ytdlIgnore404 = x }) m404
+        aaudio = maybe id (\x s -> s { ytdlExtractAudio = x }) maudio
+        ameta = maybe id (\x s -> s { ytdlAddMetadata = x }) mmeta
+        afmt = maybe id (\x s -> s { ytdlAudioFormat = x }) mfmt
 
     youtubeDlAsync = make :<|> check where
-      make :: YoutubeDlReq -> Apollo JobId e AsyncResult JobQueueResult
+      make
+        :: YoutubeDlReq
+        -> Maybe Bool -- ^ ignore 404
+        -> Maybe Bool -- ^ extract audio
+        -> Maybe Bool -- ^ add metadata
+        -> Maybe String -- ^ audio format
+        -> Apollo JobId e AsyncResult JobQueueResult
       make = error "youtube-dl async not implemented"
 
       check

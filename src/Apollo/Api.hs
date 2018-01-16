@@ -16,10 +16,18 @@ type ApolloApiV1 k
       :> "add"
         :> "youtube-dl" :> (
           ReqBody '[JSON] YoutubeDlReq
+            :> QueryParam "ignore-404" Bool
+            :> QueryParam "extract-audio" Bool
+            :> QueryParam "add-metadata" Bool
+            :> QueryParam "audio-format" String
             :> Post '[JSON] (NonEmpty Entry)
         :<|>
           "async" :> (
             ReqBody '[JSON] YoutubeDlReq
+              :> QueryParam "ignore-404" Bool
+              :> QueryParam "extract-audio" Bool
+              :> QueryParam "add-metadata" Bool
+              :> QueryParam "audio-format" String
               :> Post '[JSON] JobQueueResult
           :<|>
             StrictQueryParam "id" k

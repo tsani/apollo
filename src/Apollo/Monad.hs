@@ -180,7 +180,7 @@ runApollo ApolloSettings{..} = iterM phi where
 
   phi :: forall a'. ApolloF k e r (ApolloIO k a') -> ApolloIO k a'
   phi = \case
-    YoutubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) k -> do
+    YoutubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) settings k -> do
       let dp = T.unpack musicDirT
       let url = T.unpack dlUrl
 
@@ -188,7 +188,7 @@ runApollo ApolloSettings{..} = iterM phi where
         outputFiles <- withDirLock' $ do
           withCwd dirPath $ do
             xs <- liftIO $ do
-              Y.youtubeDl url
+              Y.youtubeDl settings url
               Dir.listDirectory "."
             maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
