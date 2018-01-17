@@ -1,6 +1,7 @@
 module Apollo.Types.Job
 ( Progress(..)
 , MonadJob(..)
+, MonadJobControl(..)
 , Exists(..)
 , Some
 , JobInfo(..)
@@ -14,8 +15,10 @@ module Apollo.Types.Job
 ) where
 
 import Control.Concurrent
+import Control.Monad.Base
 import Control.Monad.Except
 import Control.Monad.Reader
+import Control.Monad.Trans.Control
 import Data.Bool ( bool )
 import Data.IORef
 import Data.Map ( Map )
@@ -23,8 +26,28 @@ import qualified Data.Map as Map
 
 data Progress = Progress Int Int
 
+class MonadJobControl m where
+  -- | Type of identifiers of jobs.
+  type ControlJobId m :: *
+
+  -- | Type of errors raised during execution of jobs.
+  type ControlJobError m :: *
+
+  -- | Type of results produced by jobs.
+  type ControlJobResult m :: *
+
+  -- | Launches an asynchronous 'Job'.
+  startAsyncJob
+    :: Progress -- ^ Initial progress of the job.
+    -> Job (ControlJobError m) (ControlJobResult m)
+    -> m (ControlJobId m)
+
+  queryAsyncJob
+    :: ControlJobId m
+    -> m (JobInfo (ControlJobError m) (ControlJobResult m))
+
 -- | Abstract monad with distinguished actions job code may perform.
-class MonadJob m where
+class MonadBaseControl IO m => MonadJob m where
   -- | The type of errors raised by this job code.
   type JobError m :: *
 
@@ -99,11 +122,19 @@ newtype RunJob e a
     , Monad
     , MonadIO
     , MonadError e
+    , MonadBase IO
+    , MonadReader (IORef Progress)
     )
 
 -- | Interpret a 'RunJob' computation in @IO@.
 runRunJob :: IORef Progress -> RunJob e a -> IO (Either e a)
 runRunJob pv (RunJob f) = runExceptT (runReaderT f pv)
+
+instance MonadBaseControl IO (RunJob e) where
+  type StM (RunJob e) a = Either e a
+
+  liftBaseWith f = ask >>= \r -> liftIO $ f (runRunJob r)
+  restoreM s = RunJob $ ReaderT $ const $ ExceptT $ pure s
 
 instance MonadJob (RunJob e) where
   type JobError (RunJob e) = e
@@ -116,16 +147,34 @@ newtype NoProgress e a
   = NoProgress
     { unNoProgress :: ExceptT e IO a
     }
-  deriving (Functor, Applicative, Monad, MonadError e, MonadIO)
+  deriving
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadError e
+    , MonadIO
+    , MonadBase IO
+    )
 
--- | progress reporting is a no-op and errors are IO exceptions
+runNoProgress :: NoProgress e a -> IO (Either e a)
+runNoProgress = runExceptT . unNoProgress
+
+instance MonadBaseControl IO (NoProgress e) where
+  type StM (NoProgress e) a = Either e a
+
+  liftBaseWith f = liftIO $ f runNoProgress
+  restoreM s = NoProgress $ ExceptT $ pure s
+
+-- | Progress reporting is a no-op and errors are reported through 'ExceptT'.
 instance MonadJob (NoProgress e) where
   type JobError (NoProgress e) = e
   reportProgress _ = pure ()
   jobError = throwError
 
 -- | A job is simply a monadic computation capable of being interpreted in an
--- arbitrary monad satisfying 'MonadJob' and 'MonadIO'.
+-- arbitrary monad satisfying 'MonadJob' and 'MonadIO', i.e. in which both job
+-- actions and IO actions can be performed.
+--
 type Job e a = forall m. (MonadJob m, MonadIO m, JobError m ~ e) => m a
 
 -- | Run a job synchronously. Progress reports are ignored, and errors raised

@@ -29,20 +29,21 @@ executable apollo
       -O0
 
   other-modules:
-    Apollo.Api,
-    Apollo.Archive,
-    Apollo.Crypto,
-    Apollo.Misc,
-    Apollo.Monad,
-    Apollo.Monad.Types,
-    Apollo.Reflection,
-    Apollo.Server,
-    Apollo.Track,
-    Apollo.Transcoding,
-    Apollo.Types,
-    Apollo.Types.Job,
-    Apollo.Types.Servant,
+    Apollo.Api
+    Apollo.Archive
+    Apollo.Crypto
+    Apollo.Misc
+    Apollo.Monad
+    Apollo.Monad.Types
+    Apollo.Reflection
+    Apollo.Server
+    Apollo.Track
+    Apollo.Transcoding
+    Apollo.Types
+    Apollo.Types.Job
+    Apollo.Types.Servant
     Apollo.YoutubeDl
+    Apollo.Parser
 
   default-extensions:
     ConstraintKinds
@@ -78,10 +79,10 @@ executable apollo
     data-default-class >=0.1,
     directory >=1.2,
     filepath >=1.4,
-    free >=4.12,
     http-api-data >=0.3,
     http-types >=0.9,
     libmpd >=0.9,
+    monad-control >=1.0,
     servant >=0.11,
     servant-server >=0.11,
     mtl >=2.2,
@@ -90,6 +91,7 @@ executable apollo
     string-conversions >=0.4,
     temporary >=1.2,
     text >=1.2,
+    transformers-base >=0.4,
     wai >=3.2,
     wai-extra >=3.0,
     warp >=3.2,

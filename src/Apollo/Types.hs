@@ -10,6 +10,7 @@ module Apollo.Types
 , TrackIdW(..)
 , Entry(..)
 , YoutubeDlUrl(..)
+, urlToString
 , PlaybackState(..)
 , PlayerStatus(..)
 , TranscodingParameters(..)
@@ -141,6 +142,9 @@ newtype YoutubeDlUrl
     { unYoutubeDlUrl :: Text
     }
   deriving (Eq, Ord, Read, Show, FromJSON, ToJSON)
+
+urlToString :: YoutubeDlUrl -> String
+urlToString = T.unpack . unYoutubeDlUrl
 
 -- | Wraps 'MPD.State' so modules that import this one won't need to import
 -- libmpd modules.

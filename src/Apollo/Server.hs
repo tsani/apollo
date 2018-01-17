@@ -8,26 +8,34 @@ module Apollo.Server
 
 import Apollo.Api
 import Apollo.Misc
-import Apollo.Monad ( Apollo, ApolloError )
-import qualified Apollo.Monad as A
+import qualified Apollo.Monad.Types as A
+import Apollo.Monad
 import Apollo.Types
-import Apollo.YoutubeDl ( defaultYoutubeDlSettings, YoutubeDlSettings(..) )
+import qualified Apollo.YoutubeDl as Y
 
 import Control.Concurrent ( threadDelay )
-import Control.Monad.IO.Class ( liftIO )
+import Control.Concurrent.Async
+import Control.Concurrent.Chan
 import Control.Monad ( forM_, join )
+import Control.Monad.IO.Class ( liftIO )
+import Control.Monad.Reader
 import Data.Default.Class ( def )
 import Data.IORef
 import Data.List.NonEmpty ( NonEmpty )
 import Servant
 
 type ApolloServer k e r
-  = ServerT (ApolloApi k) (Apollo k e r)
+  = ServerT (ApolloApi k) (ApolloIO k e r)
 
 data AsyncResult
   = AsyncTranscodeResult (NonEmpty TrackId)
+  -- ^ Result of asynchronously transcoding.
   | AsyncTestResult Int
+  -- ^ Result of asynchronous test.
   | AsyncArchiveResult ArchiveId
+  -- ^ Result of asynchronously archiving.
+  | AsyncYoutubeDlResult (NonEmpty Entry)
+  -- ^ Result of asynchronously downloading music.
 
 server :: ApolloServer JobId (ApolloError JobId) AsyncResult
 server = topRoutes where
@@ -46,14 +54,13 @@ server = topRoutes where
       -> Maybe Bool -- ^ extract audio
       -> Maybe Bool -- ^ add metadata
       -> Maybe String -- ^ audio format
-      -> Apollo JobId e AsyncResult (NonEmpty Entry)
+      -> ApolloIO JobId e AsyncResult (NonEmpty Entry)
     youtubeDlSync YoutubeDlReq{..} m404 maudio mmeta mfmt =
-      A.youtubeDl downloadPath downloadUrl settings where
-        settings = a404 . aaudio . ameta . afmt $ defaultYoutubeDlSettings
-        a404 = maybe id (\x s -> s { ytdlIgnore404 = x }) m404
-        aaudio = maybe id (\x s -> s { ytdlExtractAudio = x }) maudio
-        ameta = maybe id (\x s -> s { ytdlAddMetadata = x }) mmeta
-        afmt = maybe id (\x s -> s { ytdlAudioFormat = x }) mfmt
+        A.youtubeDl
+          downloadPath
+          downloadUrl
+          (settings m404 maudio mmeta mfmt)
+          (const $ pure ())
 
     youtubeDlAsync = make :<|> check where
       make
@@ -62,56 +69,106 @@ server = topRoutes where
         -> Maybe Bool -- ^ extract audio
         -> Maybe Bool -- ^ add metadata
         -> Maybe String -- ^ audio format
-        -> Apollo JobId e AsyncResult JobQueueResult
-      make = error "youtube-dl async not implemented"
+        -> ApolloIO JobId (ApolloError JobId) AsyncResult JobQueueResult
+      make YoutubeDlReq{..} m404 maudio mmeta mfmt = do
+        let s = settings m404 maudio mmeta mfmt
+
+        r <- ask
+        i <- startAsyncJob (Progress 0 1) $ do
+          chan <- liftIO newChan
+          -- in one thread, perform the download and send progress reports
+          -- through the chan
+          a <- liftIO $ async $ runApolloIO r $ do
+            -- write progress reports using Right into the chan
+            A.youtubeDl downloadPath downloadUrl s (liftIO . writeChan chan . Right)
+
+          -- we spawn a new thread that monitors the one we created
+          _ <- liftIO $ async $ waitCatch a >>= \case
+            -- if the other thread blew up, then we write a death message into
+            -- the chan
+            Left e -> writeChan chan (Left $ Left e)
+            -- if the other thread successfully completed, then we write a
+            -- success message into the chan
+            Right es -> writeChan chan (Left $ Right es)
+
+          -- in the main job thread, we pump the chan
+          either jobError (pure . AsyncYoutubeDlResult) =<< pumpProgress chan
+
+        apiUrl <- A.getApiLink $ linkURI $
+          apiLink' (Proxy :: Proxy (QueryAsyncYoutubeDl JobId)) i
+
+        pure JobQueueResult
+          { jobQueueId = i
+          , jobQueueQueryUrl = apiUrl
+          }
 
       check
         :: JobId
-        -> Apollo
+        -> ApolloIO
           JobId
-          e
+          (ApolloError JobId)
           AsyncResult
           (JobQueryResult (ApolloError JobId) (NonEmpty Entry))
-      check = error "youtube-dl async not implemented"
+      check i = do
+        r <- queryAsyncJob i
+        pure . JobQueryResult . join . (r <#>) $ \case
+          AsyncTranscodeResult _ ->
+            JobFailed (WrongAsyncResult "youtube-dl" "transcode")
+
+          AsyncTestResult{} ->
+            JobFailed (WrongAsyncResult "youtube-dl" "test")
+
+          AsyncArchiveResult{} ->
+            JobFailed (WrongAsyncResult "youtube-dl" "archive")
+
+          AsyncYoutubeDlResult entries ->
+            JobComplete entries
+
+    settings m404 maudio mmeta mfmt =
+      a404 . aaudio . ameta . afmt $ Y.defaultYoutubeDlSettings where
+        a404 = maybe id (\x s -> s { Y.ytdlIgnore404 = x }) m404
+        aaudio = maybe id (\x s -> s { Y.ytdlExtractAudio = x }) maudio
+        ameta = maybe id (\x s -> s { Y.ytdlAddMetadata = x }) mmeta
+        afmt = maybe id (\x s -> s { Y.ytdlAudioFormat = x }) mfmt
 
   playlist = deleteTracks :<|> enqueueTracks :<|> getPlaylist where
-    deleteTracks :: [PlaylistItemId] -> Apollo JobId e AsyncResult Playlist
-    deleteTracks items = A.deleteTracks items *> A.getPlaylist
+    deleteTracks :: [PlaylistItemId] -> ApolloIO JobId e AsyncResult Playlist
+    deleteTracks items = A.deleteTracks items *> getPlaylist
 
     enqueueTracks
       :: Maybe PositionBetweenTracks
       -> (NonEmpty FilePath)
-      -> Apollo JobId e AsyncResult (NonEmpty PlaylistItemId)
+      -> ApolloIO JobId e AsyncResult (NonEmpty PlaylistItemId)
     enqueueTracks p = A.enqueueTracks (maybe def id p)
 
-    getPlaylist :: Apollo JobId e AsyncResult Playlist
+    getPlaylist :: ApolloIO JobId e AsyncResult Playlist
     getPlaylist = A.getPlaylist
 
-  status :: Apollo JobId e AsyncResult PlayerStatus
+  status :: ApolloIO JobId e AsyncResult PlayerStatus
   status = A.getPlayerStatus
 
   transcodings = makeTranscode :<|> getTranscode :<|> asyncTranscoding where
-    makeTranscode :: TranscodeReq -> Apollo JobId e AsyncResult TrackIdW
+    makeTranscode :: TranscodeReq -> ApolloIO JobId e AsyncResult TrackIdW
     makeTranscode TranscodeReq{..} = TrackIdW
-      <$> A.transcodeTrack transSource transParams
+      <$> A.makeTranscode transSource transParams
 
     getTranscode
       :: TrackId
       -> TranscodingParameters
-      -> Apollo JobId e AsyncResult LazyTrackData
+      -> ApolloIO JobId e AsyncResult LazyTrackData
     getTranscode = A.readTranscodeLazily
 
     asyncTranscoding = startAsyncTranscode :<|> checkAsyncTranscode where
       startAsyncTranscode
         :: NonEmpty TranscodeReq
-        -> Apollo JobId e AsyncResult JobQueueResult
+        -> ApolloIO JobId e AsyncResult JobQueueResult
       startAsyncTranscode reqs = do
-        m <- A.getMusicDir
-        t <- A.getTranscodeDir
+        m <- asks apolloMusicDirP
+        t <- asks apolloTranscodeDirP
 
-        let f TranscodeReq{..} = A.doTranscode m t transSource transParams
-        i <- A.startBatchAsyncJob reqs $ do
-          AsyncTranscodeResult <$> A.forUpdate reqs (liftIO . f)
+        let f TranscodeReq{..} = doTranscode m t transSource transParams
+        i <- startAsyncJob (Progress 0 $ length reqs) $ do
+          AsyncTranscodeResult <$> forUpdate reqs (liftIO . f)
 
         url <- A.getApiLink $ linkURI $
           apiLink' (Proxy :: Proxy (QueryAsyncTranscode JobId)) i
@@ -123,25 +180,30 @@ server = topRoutes where
 
       checkAsyncTranscode
         :: JobId
-        -> Apollo
+        -> ApolloIO
           JobId
           (ApolloError JobId)
           AsyncResult
           (JobQueryResult (ApolloError JobId) (NonEmpty TrackId))
       checkAsyncTranscode i = do
-        r <- A.queryAsyncJob i
+        r <- queryAsyncJob i
         pure . JobQueryResult . join . (r <#>) $ \case
           AsyncTranscodeResult n ->
             JobComplete n
 
           AsyncTestResult{} ->
-            JobFailed (A.WrongAsyncResult "transcode" "test")
+            JobFailed (WrongAsyncResult "transcode" "test")
 
           AsyncArchiveResult{} ->
-            JobFailed (A.WrongAsyncResult "archive" "test")
+            JobFailed (WrongAsyncResult "transcode" "archive")
+
+          AsyncYoutubeDlResult _ ->
+            JobFailed (WrongAsyncResult "transcode" "youtube-dl")
 
   archives = makeArchive :<|> getArchive :<|> asyncArchive where
-    makeArchive :: NonEmpty ArchiveEntry -> Apollo k e a ArchivalResult
+    makeArchive
+      :: (Bounded k, Enum k, Ord k)
+      => NonEmpty ArchiveEntry -> ApolloIO k e a ArchivalResult
     makeArchive entries = do
       archiveId <- A.makeArchive entries
       archiveUrl <- A.getStaticUrl (StaticArchive archiveId)
@@ -150,20 +212,22 @@ server = topRoutes where
         , archivalResUrl = archiveUrl
         }
 
-    getArchive :: ArchiveId -> Apollo k e a LazyArchiveData
+    getArchive
+      :: (Bounded k, Enum k, Ord k)
+      => ArchiveId -> ApolloIO k e a LazyArchiveData
     getArchive = A.readArchiveLazily
 
     asyncArchive = make :<|> check where
       make
         :: NonEmpty ArchiveEntry
-        -> Apollo JobId (ApolloError JobId) AsyncResult JobQueueResult
+        -> ApolloIO JobId (ApolloError JobId) AsyncResult JobQueueResult
       make entries = do
-        md <- A.getMusicDir
-        td <- A.getTranscodeDir
-        ad <- A.getArchiveDir
+        md <- asks apolloMusicDirP
+        td <- asks apolloTranscodeDirP
+        ad <- asks apolloArchiveDirP
 
-        i <- A.startBatchAsyncJob entries $ do
-          AsyncArchiveResult <$> A.doMakeArchive md td ad entries
+        i <- startAsyncJob (Progress 0 $ length entries) $ do
+          AsyncArchiveResult <$> doMakeArchive md td ad entries
 
         url <- A.getApiLink $
           linkURI $ apiLink'
@@ -177,34 +241,37 @@ server = topRoutes where
 
       check
         :: JobId
-        -> Apollo
+        -> ApolloIO
           JobId
           (ApolloError JobId)
           AsyncResult
           (JobQueryResult (ApolloError JobId) ArchivalResult)
       check i = do
-        r <- A.queryAsyncJob i
+        r <- queryAsyncJob i
 
         p <- pure . join . (r <#>) $ \case
           AsyncTranscodeResult{} ->
-            JobFailed (A.WrongAsyncResult "archive" "transcode")
+            JobFailed (WrongAsyncResult "archive" "transcode")
 
           AsyncTestResult{} ->
-            JobFailed (A.WrongAsyncResult "archive" "test")
+            JobFailed (WrongAsyncResult "archive" "test")
 
           AsyncArchiveResult n ->
             JobComplete n
+
+          AsyncYoutubeDlResult _ ->
+            JobFailed (WrongAsyncResult "archive" "youtube-dl")
 
         fmap JobQueryResult . sequence $ p <#> \x -> do
           ArchivalResult <$> pure x <*> A.getStaticUrl (StaticArchive x)
 
   testAsync = make :<|> check where
-    make :: [Int] -> Apollo JobId e AsyncResult JobQueueResult
+    make :: [Int] -> ApolloIO JobId e AsyncResult JobQueueResult
     make ns = do
       let l = length ns
 
       -- run the async job to add up the numbers
-      i <- A.startAsyncJob (Progress 0 l) $ do
+      i <- startAsyncJob (Progress 0 l) $ do
         -- a sum starts a zero
         v <- liftIO (newIORef 0)
 
@@ -231,19 +298,30 @@ server = topRoutes where
 
     check
       :: JobId
-      -> Apollo
+      -> ApolloIO
         JobId
         (ApolloError JobId)
         AsyncResult
         (JobQueryResult (ApolloError JobId) Foo)
     check i = do
-      r <- A.queryAsyncJob i
+      r <- queryAsyncJob i
       pure . JobQueryResult . join . (r <#>) $ \case
         AsyncTranscodeResult{} ->
-          JobFailed $ A.WrongAsyncResult "test" "transcode"
+          JobFailed $ WrongAsyncResult "test" "transcode"
 
         AsyncTestResult n ->
           JobComplete $ Foo n
 
         AsyncArchiveResult{} ->
-          JobFailed $ A.WrongAsyncResult "test" "archive"
+          JobFailed $ WrongAsyncResult "test" "archive"
+
+        AsyncYoutubeDlResult _ ->
+          JobFailed $ WrongAsyncResult "test" "youtube-dl"
+
+pumpProgress
+  :: (JobError m ~ ApolloError k, Show a, MonadJob m, MonadIO m)
+  => Chan (Either (Either a b) (Int, Int)) -> m b
+pumpProgress chan = liftIO (readChan chan) >>= \case
+  Left (Left e) -> jobError $ SubprocessDied (show e)
+  Left (Right es) -> pure es
+  Right (n, d) -> reportProgress (Progress n d) *> pumpProgress chan

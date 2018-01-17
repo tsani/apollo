@@ -4,7 +4,7 @@ module Main ( main ) where
 
 import Apollo.Server
 import Apollo.Monad
-  ( Apollo
+  ( ApolloIO
   , ApolloError(..)
   , runApolloIO
   , makeMpdLock
@@ -12,7 +12,6 @@ import Apollo.Monad
   , ApolloSettings(..)
   , ServerSettings(..)
   , MpdSettings(..)
-  , runApollo
   )
 import Apollo.Types
 
@@ -56,6 +55,9 @@ main = do
           , serverScheme = T.pack stScheme
           , serverPort = stPort
           }
+        , apolloMusicDirP = "music"
+        , apolloTranscodeDirP = "transcode"
+        , apolloArchiveDirP = "archive"
         }
 
   let httpPort = read p :: Int
@@ -70,8 +72,8 @@ app settings = serve api server' where
   server' :: Server (ApolloApi JobId)
   server' = enter nat server
 
-  nat :: Apollo JobId (ApolloError JobId) AsyncResult :~> Handler
-  nat = NT $ (>>= adjust) . liftIO . runApolloIO . runApollo settings
+  nat :: ApolloIO JobId (ApolloError JobId) AsyncResult :~> Handler
+  nat = NT $ (>>= adjust) . liftIO . runApolloIO settings
 
   adjust :: Either (ApolloError JobId) a -> Handler a
   adjust m = case m of
@@ -81,4 +83,5 @@ app settings = serve api server' where
       NoSuchJob{} -> err404 { errBody = encode e }
       WrongAsyncResult{} -> err400 { errBody = encode e }
       EmptyYoutubeDlResult{} -> err500 { errBody = encode e }
+      SubprocessDied{} -> err500 { errBody = encode e }
     Right x -> pure x

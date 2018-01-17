@@ -10,6 +10,8 @@ import Data.Proxy
 
 import Servant.API
 
+-- | The Apollo API version 1, parameterized by the type of keys used to access
+-- jobs.
 type ApolloApiV1 k
   =
     "tracks"
@@ -134,5 +136,6 @@ type QueryAsyncYoutubeDl k
   :> "tracks"
   :> "add"
   :> "youtube-dl"
+  :> "async"
   :> StrictQueryParam "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))
