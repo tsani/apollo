@@ -32,7 +32,7 @@ type ApolloApiV1 k
               :> QueryParam "audio-format" String
               :> Post '[JSON] JobQueueResult
           :<|>
-            StrictQueryParam "id" k
+            Capture "id" k
               :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))
         )
       )
@@ -137,5 +137,5 @@ type QueryAsyncYoutubeDl k
   :> "add"
   :> "youtube-dl"
   :> "async"
-  :> StrictQueryParam "id" k
+  :> Capture "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))
