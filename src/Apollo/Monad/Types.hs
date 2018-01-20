@@ -215,17 +215,19 @@ instance ToJSON k => ToJSON (ApolloError k) where
   toJSON = \case
     ApolloMpdError e -> object
       [ "type" .= (id @Text "mpd")
-      , "error" .= show e
+      , "message" .= show e
       ]
 
     NoSuchTranscode tid params -> object
       [ "type" .= (id @Text "transcode not found")
+      , "message" .= (id @Text "no such transcode")
       , "trackId" .= tid
       , "params" .= params
       ]
 
     NoSuchJob k -> object
       [ "type" .= (id @Text "job not found")
+      , "message" .= (id @Text "no such job")
       , "jobId" .= k
       ]
 

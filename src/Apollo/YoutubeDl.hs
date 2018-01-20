@@ -76,8 +76,9 @@ youtubeDlProgress settings url f = do
     (proc "youtube-dl" (renderSettings settings [url]))
     { std_out = CreatePipe }
   let isAlive = isNothing <$> liftIO (getProcessExitCode p)
+  let traceLine = liftIO (hGetLine h) >>= \l -> liftIO (putStrLn l) *> pure l
   whileM_ isAlive $ do
-    (parseDlProgress <$> liftIO (hGetLine h)) >>= \case
+    (parseDlProgress <$> traceLine) >>= \case
       -- if we couldn't parse the line, then it must have been different kind
       -- of output line
       Nothing -> pure ()
