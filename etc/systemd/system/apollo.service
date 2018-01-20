@@ -1,0 +1,13 @@
+[Unit]
+Description=Apollo MPD Integration Server
+After=network-online.target
+
+[Service]
+User=apollo
+Group=apollo
+WorkingDirectory=/var/labcoders-radio
+ExecStart=/home/apollo/.local/bin/apollo
+EnvironmentFile=/etc/apollo.env
+
+[Install]
+WantedBy=multi-user.target
