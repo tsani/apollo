@@ -118,7 +118,7 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
       outputFiles <- do
         xs <- do
           Y.youtubeDlProgress (Just dirPath) s url a
-          liftIO (Dir.listDirectory ".")
+          liftIO (Dir.listDirectory dirPath)
         maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
       md <- asks apolloMusicDirP
