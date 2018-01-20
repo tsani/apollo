@@ -118,22 +118,25 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
     tmpDir <- asks apolloTmpDir
     entries <- withTempDirectory tmpDir "apollo." $ \dirPath -> do
       outputFiles <- withDirLock' $ do
+        -- move into the tmp dir and download the tracks
         withCwd dirPath $ do
           xs <- do
             Y.youtubeDlProgress s url a
             liftIO (Dir.listDirectory ".")
           maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
-      inMusicDir $ liftIO $ do
-        Dir.createDirectoryIfMissing True dp
+      md <- asks apolloMusicDirP
+      liftIO $ do
+        -- create the destination directory if necessary
+        Dir.createDirectoryIfMissing True (md </> dp)
+        -- copy the output files into the destination directory
         forM_ outputFiles $ \outputFile -> do
-          Dir.copyFile (dirPath </> outputFile) (dp </> outputFile)
+          Dir.copyFile (dirPath </> outputFile) (md </> dp </> outputFile)
 
       pure (Entry musicDir . T.pack <$> outputFiles)
 
-    let musicDirS = T.unpack musicDirT
-    liftIO (putStrLn $ "updating MPD database in " ++ musicDirS)
-    updateDB (Just $ fromString musicDirS)
+    liftIO (putStrLn $ "updating MPD database in " ++ dp)
+    updateDB (Just $ fromString dp)
 
     pure entries
 
@@ -342,18 +345,6 @@ withCwd :: FilePath -> ApolloIO k e r a -> ApolloIO k e r a
 withCwd d m =
   liftBaseWith (\runInBase -> Dir.withCurrentDirectory d $ runInBase m)
   >>= restoreM
-
-inDir :: FilePath -> ApolloIO k e r a -> ApolloIO k e r a
-inDir d action = withDirLock' $ withCwd d $ do
-  liftIO $ putStrLn $ "cwd -> " ++ d
-  x <- action
-  liftIO $ putStrLn $ "cwd <- " ++ d
-  pure x
-
-inMusicDir :: ApolloIO k e r a -> ApolloIO k e r a
-inMusicDir m = do
-  p <- asks apolloMusicDirP
-  inDir p m
 
 runMpd :: MpdSettings -> MPD.MPD b -> IO (MPD.Response b)
 runMpd MpdSettings{..} = MPD.withMPDEx mpdHost mpdPort mpdPassword
