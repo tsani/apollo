@@ -190,6 +190,7 @@ data ApolloSettings k e a
     , apolloMusicDirP :: FilePath
     , apolloTranscodeDirP :: FilePath
     , apolloArchiveDirP :: FilePath
+    , apolloTmpDir :: FilePath
     }
 
 -- | Errors that can arise during the IO interpretation of the 'Apollo' monad,

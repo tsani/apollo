@@ -115,7 +115,8 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
     let dp = T.unpack musicDirT
     let url = T.unpack dlUrl
 
-    entries <- withTempDirectory "/tmp" "apollo." $ \dirPath -> do
+    tmpDir <- asks apolloTmpDir
+    entries <- withTempDirectory tmpDir "apollo." $ \dirPath -> do
       outputFiles <- withDirLock' $ do
         withCwd dirPath $ do
           xs <- do
