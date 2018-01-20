@@ -23,48 +23,69 @@ import Network.Wai ( Application )
 import Network.Wai.Handler.Warp ( run )
 import Network.Wai.Middleware.RequestLogger ( logStdoutDev )
 import Servant
-import System.Environment ( getArgs )
+import System.Environment ( getEnv )
 
 import Prelude hiding ( (.) )
 
-main :: IO ()
-main = do
-  [p, host, port', pass, apiScheme, apiDomain, apiPort', stScheme, stDomain, stPort'] <- getArgs
-  let (port, apiPort, stPort) = (read port', read apiPort', read stPort')
+type ApolloSettings' = ApolloSettings JobId (ApolloError JobId) AsyncResult
+
+loadConfig :: IO (Int, ApolloSettings')
+loadConfig = do
+  port <- read <$> getEnv "APOLLO_PORT"
+
+  mHost <- getEnv "APOLLO_MPD_HOST"
+  mPort <- read <$> getEnv "APOLLO_MPD_PORT"
+  mPass <- getEnv "APOLLO_MPD_PASSWORD"
+
+  apiDomain <- T.pack <$> getEnv "APOLLO_API_DOMAIN"
+  apiScheme <- T.pack <$> getEnv "APOLLO_API_SCHEME"
+  apiPort <- read <$> getEnv "APOLLO_API_PORT"
+
+  staticDomain <- T.pack <$> getEnv "APOLLO_STATIC_DOMAIN"
+  staticScheme <- T.pack <$> getEnv "APOLLO_STATIC_SCHEME"
+  staticPort <- read <$> getEnv "APOLLO_STATIC_PORT"
+
+  musicDir <- getEnv "APOLLO_MUSIC_DIR"
+  transDir <- getEnv "APOLLO_TRANSCODE_DIR"
+  archiveDir <- getEnv "APOLLO_ARCHIVE_DIR"
+  tmpDir <- getEnv "APOLLO_TMP_DIR"
 
   mpdLock <- makeMpdLock
   dirLock <- makeDirLock
   jobBank <- newJobBankVar
 
-  let settings = ApolloSettings
-        { apolloMpdSettings = MpdSettings
-          { mpdHost = host
-          , mpdPort = port
-          , mpdPassword = pass
-          }
-        , apolloDirLock = dirLock
-        , apolloMpdLock = mpdLock
-        , apolloJobBank = jobBank
-        , apolloApiServerSettings = ServerSettings
-          { serverDomain = T.pack apiDomain
-          , serverScheme = T.pack apiScheme
-          , serverPort = apiPort
-          }
-        , apolloStaticServerSettings = ServerSettings
-          { serverDomain = T.pack stDomain
-          , serverScheme = T.pack stScheme
-          , serverPort = stPort
-          }
-        , apolloMusicDirP = "music"
-        , apolloTranscodeDirP = "transcode"
-        , apolloArchiveDirP = "archive"
-        }
+  pure $ (,) port ApolloSettings
+    { apolloMpdSettings = MpdSettings
+      { mpdHost = mHost
+      , mpdPort = mPort
+      , mpdPassword = mPass
+      }
+    , apolloDirLock = dirLock
+    , apolloMpdLock = mpdLock
+    , apolloJobBank = jobBank
+    , apolloApiServerSettings = ServerSettings
+      { serverDomain = apiDomain
+      , serverScheme = apiScheme
+      , serverPort = apiPort
+      }
+    , apolloStaticServerSettings = ServerSettings
+      { serverDomain = staticDomain
+      , serverScheme = staticScheme
+      , serverPort = staticPort
+      }
+    , apolloMusicDirP = musicDir
+    , apolloTranscodeDirP = transDir
+    , apolloArchiveDirP = archiveDir
+    , apolloTmpDir = tmpDir
+    }
 
-  let httpPort = read p :: Int
+main :: IO ()
+main = do
+  (httpPort, settings) <- loadConfig
   putStrLn $ "Listening on port " ++ show httpPort
   run httpPort (logStdoutDev $ app settings)
 
-app :: ApolloSettings JobId (ApolloError JobId) AsyncResult -> Application
+app :: ApolloSettings' -> Application
 app settings = serve api server' where
   api :: Proxy (ApolloApi k)
   api = Proxy
