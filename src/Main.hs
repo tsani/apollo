@@ -8,7 +8,6 @@ import Apollo.Monad
   , ApolloError(..)
   , runApolloIO
   , makeMpdLock
-  , makeDirLock
   , ApolloSettings(..)
   , ServerSettings(..)
   , MpdSettings(..)
@@ -51,7 +50,6 @@ loadConfig = do
   tmpDir <- getEnv "APOLLO_TMP_DIR"
 
   mpdLock <- makeMpdLock
-  dirLock <- makeDirLock
   jobBank <- newJobBankVar
 
   pure $ (,) port ApolloSettings
@@ -60,7 +58,6 @@ loadConfig = do
       , mpdPort = mPort
       , mpdPassword = mPass
       }
-    , apolloDirLock = dirLock
     , apolloMpdLock = mpdLock
     , apolloJobBank = jobBank
     , apolloApiServerSettings = ServerSettings

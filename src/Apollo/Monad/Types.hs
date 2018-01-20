@@ -117,18 +117,6 @@ forUpdate xs = forUpdateLen (length xs) xs
 --- Locks & Settings & Errors                                        ---
 ------------------------------------------------------------------------
 
--- | A lock for the current working directory. Since the CWD is global state,
--- we need to ensure that only one thread changes directories at a time.
-newtype DirLock = DirLock (MVar ())
-
--- | Guards an IO action with the directory lock.
-withDirLock :: DirLock -> IO a -> IO a
-withDirLock (DirLock d) = withMVar d . const
-
--- | Constructs a directory lock.
-makeDirLock :: IO DirLock
-makeDirLock = DirLock <$> newMVar ()
-
 -- | A lock for MPD access. This lock enforces a sort of transactional
 -- processing of MPD actions. The 'interpretApolloIO' interpreter batches all
 -- MPD actions performed via 'mpd' into one transaction protected by this lock,
@@ -183,7 +171,6 @@ data ApolloSettings k e a
   = ApolloSettings
     { apolloApiServerSettings :: ServerSettings
     , apolloStaticServerSettings :: ServerSettings
-    , apolloDirLock :: DirLock
     , apolloMpdLock :: MpdLock
     , apolloMpdSettings :: MpdSettings
     , apolloJobBank :: MVar (JobBank k e a)

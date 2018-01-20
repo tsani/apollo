@@ -60,21 +60,21 @@ renderSettings YoutubeDlSettings{..} =
 youtubeDl :: YoutubeDlSettings -> String -> IO ()
 youtubeDl settings = callProcess "youtube-dl" . youtubeDlArgs where
   youtubeDlArgs s = (++ pure s) . renderSettings settings $ []
-
--- | Call youtube-dl in the current directory with flags to produce mp3 files.
+-- | Call youtube-dl in the given directory with flags to produce mp3 files.
 -- If a playlist is downloaded, then the numerator and denominator that
 -- determine the progress of the batch download will be passed to the given
 -- function and the resulting IO action executed.
 youtubeDlProgress
   :: MonadIO m
-  => YoutubeDlSettings
+  => Maybe FilePath
+  -> YoutubeDlSettings
   -> String
   -> ((Int, Int) -> m ())
   -> m ()
-youtubeDlProgress settings url f = do
+youtubeDlProgress path settings url f = do
   (_, Just h, _, p) <- liftIO $ createProcess
     (proc "youtube-dl" (renderSettings settings [url]))
-    { std_out = CreatePipe }
+    { std_out = CreatePipe, cwd = path }
   let notEOF = not <$> liftIO (hIsEOF h)
   let isAlive = isNothing <$> liftIO (getProcessExitCode p)
   let traceLine = liftIO (hGetLine h) >>= \l -> liftIO (putStrLn l) *> pure l

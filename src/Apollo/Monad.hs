@@ -17,9 +17,7 @@ module Apollo.Monad
 , ApolloSettings(..)
 , ServerSettings(..)
 , MpdSettings(..)
-, DirLock
 , MpdLock
-, makeDirLock
 , makeMpdLock
 , doTranscode
 , doMakeArchive
@@ -117,13 +115,11 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
 
     tmpDir <- asks apolloTmpDir
     entries <- withTempDirectory tmpDir "apollo." $ \dirPath -> do
-      outputFiles <- withDirLock' $ do
-        -- move into the tmp dir and download the tracks
-        withCwd dirPath $ do
-          xs <- do
-            Y.youtubeDlProgress s url a
-            liftIO (Dir.listDirectory ".")
-          maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
+      outputFiles <- do
+        xs <- do
+          Y.youtubeDlProgress (Just dirPath) s url a
+          liftIO (Dir.listDirectory ".")
+        maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
       md <- asks apolloMusicDirP
       liftIO $ do
@@ -331,20 +327,10 @@ withTempDirectory x y action =
     (\runInBase -> D.withTempDirectory x y (\p -> runInBase $ action p))
   >>= restoreM
 
-withDirLock' :: ApolloIO k e r a -> ApolloIO k e r a
-withDirLock' m = do
-  l <- asks apolloDirLock
-  liftBaseWith (\runInBase -> withDirLock l $ runInBase m) >>= restoreM
-
 withMpdLock' :: ApolloIO k e r a -> ApolloIO k e r a
 withMpdLock' m = do
   l <- asks apolloMpdLock
   liftBaseWith (\runInBase -> withMpdLock l $ runInBase m) >>= restoreM
-
-withCwd :: FilePath -> ApolloIO k e r a -> ApolloIO k e r a
-withCwd d m =
-  liftBaseWith (\runInBase -> Dir.withCurrentDirectory d $ runInBase m)
-  >>= restoreM
 
 runMpd :: MpdSettings -> MPD.MPD b -> IO (MPD.Response b)
 runMpd MpdSettings{..} = MPD.withMPDEx mpdHost mpdPort mpdPassword
