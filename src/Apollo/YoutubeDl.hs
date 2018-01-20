@@ -1,6 +1,5 @@
 module Apollo.YoutubeDl
-( youtubeDl
-, youtubeDlProgress
+( youtubeDlProgress
 , YoutubeDlSettings(..)
 , defaultYoutubeDlSettings
 , countTracks
@@ -55,11 +54,6 @@ renderSettings YoutubeDlSettings{..} =
     option s True = literal s
     option _ False = id
 
--- | Call youtube-dl in the current directory with flags to produce mp3 files
--- in the current working directory.
-youtubeDl :: YoutubeDlSettings -> String -> IO ()
-youtubeDl settings = callProcess "youtube-dl" . youtubeDlArgs where
-  youtubeDlArgs s = (++ pure s) . renderSettings settings $ []
 -- | Call youtube-dl in the given directory with flags to produce mp3 files.
 -- If a playlist is downloaded, then the numerator and denominator that
 -- determine the progress of the batch download will be passed to the given
