@@ -32,24 +32,21 @@ import Apollo.Track
 import Apollo.Types
 import qualified Apollo.YoutubeDl as Y
 
-import qualified Codec.Archive.Zip as Zip
+import qualified Codec.Archive.Tar as A
 import Control.Concurrent.MVar
-import Control.Monad ( foldM, forM_ )
 import Control.Monad.Base
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.Control
-import qualified Data.Binary as Bin
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
-import Data.IORef
 import Data.Foldable ( for_ )
 import qualified Data.List.NonEmpty as N
 import Data.Maybe ( fromJust )
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
+import Data.Text.Encoding ( decodeUtf8 )
 import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import Network.URI
@@ -260,45 +257,22 @@ doTranscode musicDirP transcodeDirP track params = do
   pure tid
 
 doMakeArchive
-  :: Traversable t
-  => FilePath -- ^ music dir
+  :: FilePath -- ^ music dir
   -> FilePath -- ^ transcode dir
   -> FilePath -- ^ archive dir
-  -> t ArchiveEntry
+  -> N.NonEmpty ArchiveEntry
   -> Job (ApolloError k) ArchiveId
 doMakeArchive musicDirP transcodeDirP archiveDirP entries = do
   let archiveId@(ArchiveId (Sha1Hash idB)) = makeArchiveId entries
   let getExisting = getExistingArchive (Just archiveDirP) archiveId
-  let l = length entries
-
-  v <- liftIO (newIORef 0)
+  let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
 
   liftIO getExisting >>= \case
     Just _ -> pure () -- archive already exists; nothing to do
     Nothing -> do
-      let forFoldM i xs g = foldM g i xs
-      archive <- forFoldM Zip.emptyArchive entries $ \a e -> do
-        -- compute the path to read from, and the path to put in the archive
-        (srcP, dstP) <- case e of
-          ArchiveTrack p -> pure (musicDirP </> p, "raw" </> p)
-          ArchiveTranscode tid params -> do
-            m <- liftIO $ getExistingTranscode (Just transcodeDirP) tid params
-            p <- maybe (jobError $ NoSuchTranscode tid params) pure m
-            pure (p, "transcoded" </> transcodeDirectoryFor tid params)
-
-        i <- liftIO $ atomicModifyIORef v (\i -> (i + 1, i))
-        reportProgress (Progress i l)
-
-        let opts = [Zip.OptVerbose, Zip.OptLocation dstP False]
-        liftIO $ Zip.addFilesToArchive opts a [srcP]
-
-      let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
-      let utf8str = encodeUtf8 . T.pack
-      liftIO $ Bin.encodeFile
-        archivePath
-        archive
-          { Zip.zComment = LBS.fromStrict (utf8str "Apollo archive " <> idB)
-          }
+      es <- mapM (toFilePath musicDirP transcodeDirP) entries
+      liftIO $ LBS.writeFile archivePath . A.write
+        =<< A.pack "." (N.toList es)
 
   pure archiveId
 
@@ -351,3 +325,10 @@ updateDB p = do
     case stUpdatingDb of
       Just j' -> j' /= j
       Nothing -> True
+
+toFilePath :: FilePath -> FilePath -> ArchiveEntry -> Job (ApolloError k) FilePath
+toFilePath md td a = case a of
+  ArchiveTrack p -> pure (md </> p)
+  ArchiveTranscode tid params ->
+    maybe (jobError $ NoSuchTranscode tid params) pure
+      =<< liftIO (getExistingTranscode (Just td) tid params)
