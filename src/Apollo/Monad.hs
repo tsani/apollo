@@ -45,7 +45,7 @@ import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import Network.URI
 import qualified System.Directory as Dir
-import System.FilePath ( (</>) )
+import System.FilePath ( (</>), splitExtension, addExtension )
 import qualified System.IO.Temp as D
 
 ------------------------------------------------------------------------
@@ -99,6 +99,13 @@ instance (Bounded k, Ord k, Enum k) => MonadJobControl (ApolloIO k e r) where
   startAsyncJob p j = withJobBank $ \b ->
     liftIO (startJob p b j)
 
+-- | Because the tar archives that we use for exports have a 99-char limit on
+-- the filename, we implement this ridiculus function to drop the trailing part
+-- of the filename so that we max out at 99 chars.
+clampFileName :: FilePath -> FilePath
+clampFileName fp = case splitExtension fp of
+  (fn, ex) -> addExtension (take (99 - length ex) fn) ex
+
 instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
   youtubeDl musicDir@(MusicDir musicDirT) (YoutubeDlUrl dlUrl) s a = do
     let dp = T.unpack musicDirT
@@ -113,14 +120,18 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
         maybe (throwError EmptyYoutubeDlResult) pure $ N.nonEmpty xs
 
       md <- asks apolloMusicDirP
-      liftIO $ do
+      outputFiles' <- liftIO $ do
         -- create the destination directory if necessary
         Dir.createDirectoryIfMissing True (md </> dp)
         -- copy the output files into the destination directory
-        forM_ outputFiles $ \outputFile -> do
-          Dir.copyFile (dirPath </> outputFile) (md </> dp </> outputFile)
+        forM outputFiles $ \outputFile -> do
+          let outputFile' = clampFileName outputFile
+          Dir.copyFile
+            (dirPath </> outputFile)
+            (md </> dp </> outputFile')
+          pure outputFile'
 
-      pure (Entry musicDir . T.pack <$> outputFiles)
+      pure (Entry musicDir . T.pack <$> outputFiles')
 
     liftIO (putStrLn $ "updating MPD database in " ++ dp)
     updateDB (Just $ fromString dp)
