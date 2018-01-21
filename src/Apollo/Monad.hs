@@ -1,8 +1,3 @@
-{-|
- -
- - The apollo monad is a free monad with a few very high-level actions.
- -}
-
 {-# LANGUAGE OverloadedStrings #-}
 
 module Apollo.Monad

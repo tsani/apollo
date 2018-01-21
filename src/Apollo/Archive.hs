@@ -18,8 +18,8 @@ import qualified System.Directory as Dir
 import System.FilePath ( (</>) )
 
 makeArchiveId :: Traversable t => t ArchiveEntry -> ArchiveId
-makeArchiveId (toList -> sort -> entries) = ArchiveId h where
-  h = sha1 $ encodeUtf8 $ pack $ show entries
+makeArchiveId =
+  ArchiveId . sha1 . encodeUtf8 . pack . show . sort . toList
 
 getExistingArchive :: Maybe FilePath -> ArchiveId -> IO (Maybe FilePath)
 getExistingArchive prefix (ArchiveId (Sha1Hash b)) = do
