@@ -269,6 +269,8 @@ doMakeArchive musicDirP transcodeDirP archiveDirP entries = do
       liftIO $ LBS.writeFile archivePath . A.write
         =<< A.pack "." (N.toList es)
 
+  reportProgress (Progress 1 1)
+
   pure archiveId
 
 ------------------------------------------------------------------------

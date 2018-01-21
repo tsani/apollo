@@ -226,7 +226,7 @@ server = topRoutes where
         td <- asks apolloTranscodeDirP
         ad <- asks apolloArchiveDirP
 
-        i <- startAsyncJob (Progress 0 $ length entries) $ do
+        i <- startAsyncJob (Progress 0 1) $ do
           AsyncArchiveResult <$> doMakeArchive md td ad entries
 
         url <- A.getApiLink $
