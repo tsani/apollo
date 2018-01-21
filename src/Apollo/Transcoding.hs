@@ -65,9 +65,7 @@ getExistingTranscode prefix tid tsp
         (f:_) -> Just (dir </> f)
     else pure Nothing
   where
-    dir = case prefix of
-      Just p -> p </> transcodeDirectoryFor tid tsp
-      Nothing -> transcodeDirectoryFor tid tsp
+    dir = let p = transcodeDirectoryFor tid tsp in maybe p (</> p) prefix
 
 -- | Computes the relative path to the directory within the transcode directory
 -- where the transcoded audio of the given track ID ought to be stored.
