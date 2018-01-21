@@ -41,7 +41,6 @@ import Data.Maybe ( fromJust )
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
 import qualified Data.Text as T
-import Data.Text.Encoding ( decodeUtf8 )
 import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import Network.URI
@@ -194,17 +193,18 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
     ad <- asks apolloArchiveDirP
     liftIO $ readArchiveLazilyIO (ad </> C8.unpack b)
 
-  makeArchive entries = do
+  makeArchive c entries = do
     md <- asks apolloMusicDirP
     td <- asks apolloTranscodeDirP
     ad <- asks apolloArchiveDirP
-    either throwError pure =<< liftIO (runJob $ doMakeArchive md td ad entries)
+    either throwError pure =<< liftIO (runJob $ doMakeArchive c md td ad entries)
 
   getStaticUrl res = case res of
-    StaticArchive (ArchiveId (Sha1Hash b)) -> do
+    StaticArchive a c -> do
       s <- asks apolloStaticServerSettings
       let (Url baseUrl) = serverSettingsBaseUrl s
-      pure $ Url $ (baseUrl <> "/archives/" <> decodeUtf8 b)
+      let p = getArchivePath c (Just "/archives") a
+      pure $ Url $ (baseUrl <> T.pack p)
     StaticTranscode tid params -> error "StaticTranscode" tid params
     StaticTrack p -> error "StaticTrack" p
 
@@ -252,23 +252,23 @@ doTranscode musicDirP transcodeDirP track params = do
   pure tid
 
 doMakeArchive
-  :: FilePath -- ^ music dir
+  :: Compressor
+  -> FilePath -- ^ music dir
   -> FilePath -- ^ transcode dir
   -> FilePath -- ^ archive dir
   -> N.NonEmpty ArchiveEntry
   -> Job (ApolloError k) ArchiveId
-doMakeArchive musicDirP transcodeDirP archiveDirP entries = do
-  let archiveId@(ArchiveId (Sha1Hash idB)) = makeArchiveId entries
-  let getExisting = getExistingArchive (Just archiveDirP) archiveId
-  let archivePath = archiveDirP </> T.unpack (decodeUtf8 idB)
+doMakeArchive c musicDirP transcodeDirP archiveDirP entries = do
+  let archiveId = makeArchiveId entries
+  let p = getArchivePath c (Just archiveDirP) archiveId
 
-  liftIO getExisting >>= \case
-    Just _ -> pure () -- archive already exists; nothing to do
-    Nothing -> do
-      liftIO . putStrLn $ "constructing archive " ++ archivePath ++
+  liftIO (Dir.doesFileExist p) >>= \case
+    True -> pure () -- archive already exists; nothing to do
+    False -> do
+      liftIO . putStrLn $ "constructing archive " ++ p ++
         " with " ++ show (length entries) ++ " entries"
       es <- mapM (toFilePath musicDirP transcodeDirP) entries
-      liftIO $ LBS.writeFile archivePath . A.write
+      liftIO $ LBS.writeFile p . compressWith c . A.write
         =<< A.pack "." (N.toList es)
 
   reportProgress (Progress 1 1)

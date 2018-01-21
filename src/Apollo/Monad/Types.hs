@@ -72,7 +72,7 @@ class (MonadJobControl m, MonadBaseControl IO m) => MonadApollo m where
   readArchiveLazily :: ArchiveId -> m LazyArchiveData
 
   -- | Constructs an archive with the given entries.
-  makeArchive :: NonEmpty ArchiveEntry -> m ArchiveId
+  makeArchive :: Compressor -> NonEmpty ArchiveEntry -> m ArchiveId
 
   -- | Gets a URL to a static resource such as an archive.
   getStaticUrl :: StaticResource -> m Url

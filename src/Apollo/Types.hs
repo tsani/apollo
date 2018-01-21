@@ -34,11 +34,18 @@ module Apollo.Types
 , JobQueueResult(..)
 , JobQueryResult(..)
 , JsonVoid(JsonVoid)
+, Compressor
+, compressWith
+, compressExtension
+, noCompression
+, lzmaCompression
 , module Apollo.Types.Job
+, def
 ) where
 
 import Apollo.Types.Job
 
+import qualified Codec.Compression.Lzma as LZMA
 import Data.Aeson
 import Data.ByteString ( ByteString )
 import qualified Data.ByteString.Lazy as LBS
@@ -483,10 +490,9 @@ newtype Seconds
   deriving (Eq, Ord, Read, Show, ToJSON, FromJSON)
 
 data StaticResource
-  = StaticArchive ArchiveId
+  = StaticArchive ArchiveId Compressor
   | StaticTranscode TrackId TranscodingParameters
   | StaticTrack FilePath
-  deriving (Eq, Ord, Read, Show)
 
 newtype Url
   = Url
@@ -563,3 +569,33 @@ newtype JsonVoid = JsonVoid Void
 
 instance ToJSON JsonVoid where
   toJSON (JsonVoid v) = absurd v
+
+data Compressor
+  = Compressor
+    { compressWith :: !(LBS.ByteString -> LBS.ByteString)
+    -- ^ the compression function as a lazy transformation of bytestrings.
+    , compressExtension :: !String
+    -- ^ the extension, with the dot.
+    }
+
+instance Default Compressor where
+  def = noCompression
+
+noCompression :: Compressor
+noCompression = Compressor
+  { compressWith = id
+  , compressExtension = ""
+  }
+
+lzmaCompression :: Compressor
+lzmaCompression = Compressor
+  { compressWith = LZMA.compress
+  , compressExtension = ".xz"
+  }
+
+instance FromHttpApiData Compressor where
+  parseUrlPiece t = do
+    case () of
+      _ | t == "xz" -> pure lzmaCompression
+        | t == "no" -> pure noCompression
+        | otherwise -> Left "unsupported compression"

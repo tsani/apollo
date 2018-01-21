@@ -68,6 +68,7 @@ type ApolloApiV1 k
   :<|>
     "archive" :> (
       ReqBody '[JSON] (NonEmpty ArchiveEntry)
+        :> QueryParam "compress" Compressor
         :> Post '[JSON] ArchivalResult
     :<|>
       StrictQueryParam "id" ArchiveId
@@ -75,6 +76,7 @@ type ApolloApiV1 k
     :<|>
       "async" :> (
         ReqBody '[JSON] (NonEmpty ArchiveEntry)
+          :> QueryParam "compress" Compressor
           :> Post '[JSON] JobQueueResult
       :<|>
         Capture "id" k

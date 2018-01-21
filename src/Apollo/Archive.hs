@@ -14,17 +14,18 @@ import Data.Text ( pack )
 import Data.Text ( unpack )
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
 import Data.Foldable ( toList )
-import qualified System.Directory as Dir
-import System.FilePath ( (</>) )
+import System.FilePath ( (</>), (<.>) )
+
+-- | Constructs the path to an archive with the given parameters.
+getArchivePath
+  :: Compressor -- ^ the compression used for the archive
+  -> Maybe FilePath -- ^ the prefix of the path, e.g. @"archive"@.
+  -> ArchiveId -- ^ the identifier of the archive
+  -> FilePath -- ^ the path to the archive.
+getArchivePath c prefix (ArchiveId (Sha1Hash b)) =
+  maybe b' (</> b') prefix <.> ("tar" ++ compressExtension c) where
+    b' = unpack (decodeUtf8 b)
 
 makeArchiveId :: Traversable t => t ArchiveEntry -> ArchiveId
 makeArchiveId =
   ArchiveId . sha1 . encodeUtf8 . pack . show . sort . toList
-
-getExistingArchive :: Maybe FilePath -> ArchiveId -> IO (Maybe FilePath)
-getExistingArchive prefix (ArchiveId (Sha1Hash b)) = do
-  let p = maybe (unpack $ decodeUtf8 b) (</> unpack (decodeUtf8 b)) prefix
-  d <- Dir.doesFileExist p
-  pure $ if d
-    then (Just p)
-    else Nothing

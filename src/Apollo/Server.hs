@@ -32,7 +32,7 @@ data AsyncResult
   -- ^ Result of asynchronously transcoding.
   | AsyncTestResult Int
   -- ^ Result of asynchronous test.
-  | AsyncArchiveResult ArchiveId
+  | AsyncArchiveResult ArchiveId Compressor
   -- ^ Result of asynchronously archiving.
   | AsyncYoutubeDlResult (NonEmpty Entry)
   -- ^ Result of asynchronously downloading music.
@@ -203,10 +203,10 @@ server = topRoutes where
   archives = makeArchive :<|> getArchive :<|> asyncArchive where
     makeArchive
       :: (Bounded k, Enum k, Ord k)
-      => NonEmpty ArchiveEntry -> ApolloIO k e a ArchivalResult
-    makeArchive entries = do
-      archiveId <- A.makeArchive entries
-      archiveUrl <- A.getStaticUrl (StaticArchive archiveId)
+      => NonEmpty ArchiveEntry -> Maybe Compressor -> ApolloIO k e a ArchivalResult
+    makeArchive entries (maybe def id -> c) = do
+      archiveId <- A.makeArchive c entries
+      archiveUrl <- A.getStaticUrl (StaticArchive archiveId c)
       pure ArchivalResult
         { archivalResId = archiveId
         , archivalResUrl = archiveUrl
@@ -220,14 +220,15 @@ server = topRoutes where
     asyncArchive = make :<|> check where
       make
         :: NonEmpty ArchiveEntry
+        -> Maybe Compressor
         -> ApolloIO JobId (ApolloError JobId) AsyncResult JobQueueResult
-      make entries = do
+      make entries (maybe def id -> c) = do
         md <- asks apolloMusicDirP
         td <- asks apolloTranscodeDirP
         ad <- asks apolloArchiveDirP
 
         i <- startAsyncJob (Progress 0 1) $ do
-          AsyncArchiveResult <$> doMakeArchive md td ad entries
+          AsyncArchiveResult <$> doMakeArchive c md td ad entries <*> pure c
 
         url <- A.getApiLink $
           linkURI $ apiLink'
@@ -256,14 +257,14 @@ server = topRoutes where
           AsyncTestResult{} ->
             JobFailed (WrongAsyncResult "archive" "test")
 
-          AsyncArchiveResult n ->
-            JobComplete n
+          AsyncArchiveResult n c ->
+            JobComplete (n, c)
 
           AsyncYoutubeDlResult _ ->
             JobFailed (WrongAsyncResult "archive" "youtube-dl")
 
-        fmap JobQueryResult . sequence $ p <#> \x -> do
-          ArchivalResult <$> pure x <*> A.getStaticUrl (StaticArchive x)
+        fmap JobQueryResult . sequence $ p <#> \(x, c) -> do
+          ArchivalResult <$> pure x <*> A.getStaticUrl (StaticArchive x c)
 
   testAsync = make :<|> check where
     make :: [Int] -> ApolloIO JobId e AsyncResult JobQueueResult

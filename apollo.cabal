@@ -82,6 +82,7 @@ executable apollo
     http-api-data >=0.3,
     http-types >=0.9,
     libmpd >=0.9,
+    lzma >=0.0.0.3,
     monad-control >=1.0,
     servant >=0.11,
     servant-server >=0.11,
