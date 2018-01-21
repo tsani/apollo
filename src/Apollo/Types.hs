@@ -542,6 +542,10 @@ instance (ToJSON e, ToJSON r) => ToJSON (JobQueryResult e r) where
       [ "status" .= ("failed" :: Text)
       , "error" .= e
       ]
+    JobDied e -> object
+      [ "status" .= ("failed" :: Text)
+      , "error" .= show e
+      ]
     JobComplete x -> object
       [ "status" .= ("complete" :: Text)
       , "result" .= x

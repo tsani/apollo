@@ -15,6 +15,8 @@ module Apollo.Types.Job
 ) where
 
 import Control.Concurrent
+import Control.Concurrent.Async
+import Control.Exception
 import Control.Monad.Base
 import Control.Monad.Except
 import Control.Monad.Reader
@@ -72,6 +74,8 @@ data JobInfo e a where
   JobComplete :: a -> JobInfo e a
   -- | The job failed, and its error is here.
   JobFailed :: e -> JobInfo e a
+  -- | The job failed catastrophically, by throwing an impure exception.
+  JobDied :: SomeException -> JobInfo e a
   -- | The job is running, and its progress measure is here.
   JobInProgress :: Progress -> JobInfo e a
 
@@ -88,13 +92,12 @@ instance Monad (JobInfo e) where
   (JobComplete x) >>= k = k x
   (JobInProgress p) >>= _ = JobInProgress p
   (JobFailed e) >>= _ = JobFailed e
+  (JobDied e) >>= _ = JobDied e
 
 -- | A job that's running.
 data RunningJob e a
   = RunningJob
-    { rjThreadId :: ThreadId
-    -- ^ The thread that's running the computation.
-    , rjResult :: MVar (Either e a)
+    { rjThread :: Async (Either e a)
     -- ^ The result of the computation. This MVar is empty until the
     -- computation completes, at which point the success or failure is written
     -- into the MVar.
@@ -195,11 +198,8 @@ startJob
 startJob p (JobBank v) m = do
   let i = bool (succ . fst $ Map.findMax v) minBound (Map.null v)
   pv <- newIORef p -- progress variable
-  rv <- newEmptyMVar -- result variable
-  t <- forkIO $ do
-    e <- runRunJob pv m
-    putMVar rv e
-  let j = RunningJob { rjThreadId = t, rjResult = rv, rjProgress = pv }
+  t <- async (runRunJob pv m)
+  let j = RunningJob { rjThread = t, rjProgress = pv }
   pure (JobBank (Map.insert i j v), i)
 
 (<#>) :: Functor f => f a -> (a -> b) -> f b
@@ -221,6 +221,7 @@ checkJob
   -> IO (Maybe (JobBank k e a, JobInfo e a))
 checkJob i b@(JobBank v) = sequence $ Map.lookup i v <#> \RunningJob{..} -> do
   let b' = JobBank (Map.delete i v)
-  tryTakeMVar rjResult >>= \case
+  poll rjThread >>= \case
     Nothing -> (b,) <$> (JobInProgress <$> readIORef rjProgress)
-    Just r -> pure . (b',) $ either JobFailed JobComplete r
+    Just r ->
+      pure . (b',) $ either JobDied (either JobFailed JobComplete) r
