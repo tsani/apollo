@@ -265,6 +265,8 @@ doMakeArchive musicDirP transcodeDirP archiveDirP entries = do
   liftIO getExisting >>= \case
     Just _ -> pure () -- archive already exists; nothing to do
     Nothing -> do
+      liftIO . putStrLn $ "constructing archive " ++ archivePath ++
+        " with " ++ show (length entries) ++ " entries"
       es <- mapM (toFilePath musicDirP transcodeDirP) entries
       liftIO $ LBS.writeFile archivePath . A.write
         =<< A.pack "." (N.toList es)
