@@ -17,6 +17,7 @@ HASURL=0
 P=
 URL=
 CLIPBOARD=0
+IGNORE404=1
 ENQUEUE=1
 
 API_VERSION=v1
@@ -36,6 +37,12 @@ while (( $# )) ; do
             ;;
         "--enqueue")
             ENQUEUE=1
+            ;;
+        "--no-ignore-404")
+            IGNORE404=0
+            ;;
+        "--ignore-404")
+            IGNORE404=1
             ;;
         *)
             if [ $HASPATH -eq 0 ] ; then
@@ -68,6 +75,12 @@ if [ $HASPATH -eq 0 -a $HASURL -eq 0 ] ; then
     exit 1
 fi
 
+qs=""
+
+if [ $IGNORE404 -eq 1 ] ; then
+    qs="?ignore-404=true"
+fi
+
 post() {
   curl --silent --fail -H 'Content-type: application/json' --data "$2" \
     ${APOLLO_BASE_URL}${API_VERSION}$1
@@ -83,15 +96,57 @@ put_() {
     ${APOLLO_BASE_URL}${API_VERSION}$1
 }
 
-if [ $ENQUEUE -eq 1 ] ; then
-  enqueue() {
-    put /playlist "$(cat)"
-  }
-else
-  enqueue() {
-    cat
-  }
+overwrite_stderr() {
+  echo -en '\r\e[0K' >&2
+}
+
+update_progress() {
+  local COMPLETE="$1"
+  local TOTAL="$2"
+  overwrite_stderr
+  echo -n "$COMPLETE / $TOTAL" >&2
+}
+
+poll_async_progress() {
+    while true ; do
+        result="$(curl --fail -s "$1")"
+        stat="$(echo "$result" | jq -r .status)"
+
+        if [ "$stat" = "running" ] ; then
+            num="$(echo "$result" | jq -r .progress.done)"
+            total="$(echo "$result" | jq -r .progress.outOf)"
+            update_progress "$num" "$total"
+        else
+            break
+        fi
+    done
+}
+
+echo -n 'Submitting download request... ' >&2
+
+queue="$(
+    post "/tracks/add/youtube-dl/async$qs" \
+        "{ \"url\": \"$URL\", \"path\": \"$P\" }"
+)"
+query="$(echo "$queue" | jq -r .query)"
+jobId="$(echo "$queue" | jq -r .jobId)"
+
+echo "ok" >&2
+
+echo "Asynchonously downloading..." >&2
+poll_async_progress "$query"
+
+echo ''
+if [ "$stat" = "failed" ] ; then
+    echo "Downloading failed." >&2
+    echo "$result" | jq -r '.error.message'
+    exit 1
+elif [ "$stat" != "complete" ] ; then
+    echo "Unknown status." >&2
+    exit 1
 fi
 
-post /tracks/add/youtube-dl "{ \"url\": \"$URL\", \"path\": \"$P\" }" |
-enqueue
+if [ $ENQUEUE -eq 1 ] ; then
+    put '/playlist?position=end_1' "$(echo $result | jq '.result')"
+fi
+
