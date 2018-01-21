@@ -61,7 +61,7 @@ type ApolloApiV1 k
         ReqBody '[JSON] (NonEmpty TranscodeReq)
           :> Post '[JSON] JobQueueResult
       :<|>
-        StrictQueryParam "id" k
+        Capture "id" k
           :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty TrackId))
       )
     )
@@ -77,7 +77,7 @@ type ApolloApiV1 k
         ReqBody '[JSON] (NonEmpty ArchiveEntry)
           :> Post '[JSON] JobQueueResult
       :<|>
-        StrictQueryParam "id" k
+        Capture "id" k
           :> Get '[JSON] (JobQueryResult (ApolloError k) ArchivalResult)
       )
     )
@@ -115,14 +115,14 @@ type QueryAsyncTranscode k
   = V1
   :> "transcode"
   :> "async"
-  :> StrictQueryParam "id" k
+  :> Capture "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty TrackId))
 
 type QueryAsyncArchive k
   = V1
   :> "archive"
   :> "async"
-  :> StrictQueryParam "id" k
+  :> Capture "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) ArchivalResult)
 
 type QueryAsyncTest k
