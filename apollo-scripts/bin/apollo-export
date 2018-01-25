@@ -130,7 +130,7 @@ poll_async_progress "$query"
 
 if [ "$stat" = "failed" ] ; then
     echo ''
-    echo "Archiving failed." >&2
+    echo -n "Archiving failed: $(echo "$result" | jq .)" >&2
     exit 1
 elif [ "$stat" = "complete" ] ; then
     archiveId="$(echo "$result" | jq -r .result.archiveId)"
