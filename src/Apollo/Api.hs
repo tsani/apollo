@@ -10,86 +10,68 @@ import Data.Proxy
 
 import Servant.API
 
+type AsyncQueryEndpoint k a =
+  Capture "id" k
+  :> Get '[JSON] (JobQueryResult (ApolloError k) a)
+  
+type YoutubeDlEndpoint a =
+  ReqBody '[JSON] YoutubeDlReq
+  :> QueryParam "ignore-404" Bool
+  :> QueryParam "extract-audio" Bool
+  :> QueryParam "add-metadata" Bool
+  :> QueryParam "audio-format" String
+  :> Post '[JSON] a
+
+type CreateArchiveEndpoint a =
+  ReqBody '[JSON] (NonEmpty ArchiveEntry)
+  :> QueryParam "compress" Compressor
+  :> Post '[JSON] a
+
 -- | The Apollo API version 1, parameterized by the type of keys used to access
 -- jobs.
-type ApolloApiV1 k
-  =
-    "tracks"
-      :> "add"
-        :> "youtube-dl" :> (
-          ReqBody '[JSON] YoutubeDlReq
-            :> QueryParam "ignore-404" Bool
-            :> QueryParam "extract-audio" Bool
-            :> QueryParam "add-metadata" Bool
-            :> QueryParam "audio-format" String
-            :> Post '[JSON] (NonEmpty Entry)
-        :<|>
-          "async" :> (
-            ReqBody '[JSON] YoutubeDlReq
-              :> QueryParam "ignore-404" Bool
-              :> QueryParam "extract-audio" Bool
-              :> QueryParam "add-metadata" Bool
-              :> QueryParam "audio-format" String
-              :> Post '[JSON] JobQueueResult
-          :<|>
-            Capture "id" k
-              :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty Entry))
-        )
-      )
+type ApolloApiV1 k =
+  "tracks" :> "add" :> "youtube-dl" :> (
+  YoutubeDlEndpoint (NonEmpty Entry)
   :<|>
-    "playlist" :> (
-      Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
+  "async" :> (
+    YoutubeDlEndpoint JobQueueResult
     :<|>
-      QueryParam "position" PositionBetweenTracks
-        :> ReqBody '[JSON] (NonEmpty FilePath)
-        :> Put '[JSON] (NonEmpty PlaylistItemId)
-    :<|>
-      Get '[JSON] Playlist
-    )
+    AsyncQueryEndpoint k (NonEmpty Entry)))
   :<|>
-    "status"
-      :> Get '[JSON] PlayerStatus
+  "playlist" :> (
+    Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
+    :<|>
+    QueryParam "position" PositionBetweenTracks
+    :> ReqBody '[JSON] (NonEmpty FilePath)
+    :> Put '[JSON] (NonEmpty PlaylistItemId)
+    :<|>
+    Get '[JSON] Playlist)
   :<|>
-    "transcode" :> (
-      ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
+  "status" :> Get '[JSON] PlayerStatus
+  :<|>
+  "transcode" :> (
+    ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
     :<|>
-      StrictQueryParam "trackId" TrackId
-        :> StrictQueryParam "params" TranscodingParameters
-        :> Get '[OctetStream] LazyTrackData
+    StrictQueryParam "trackId" TrackId
+    :> StrictQueryParam "params" TranscodingParameters
+    :> Get '[OctetStream] LazyTrackData
     :<|>
-      "async" :> (
-        ReqBody '[JSON] (NonEmpty TranscodeReq)
-          :> Post '[JSON] JobQueueResult
+    "async" :> (
+      ReqBody '[JSON] (NonEmpty TranscodeReq)
+      :> Post '[JSON] JobQueueResult
       :<|>
-        Capture "id" k
-          :> Get '[JSON] (JobQueryResult (ApolloError k) (NonEmpty TrackId))
-      )
-    )
+      AsyncQueryEndpoint k (NonEmpty TrackId)))
   :<|>
-    "archive" :> (
-      ReqBody '[JSON] (NonEmpty ArchiveEntry)
-        :> QueryParam "compress" Compressor
-        :> Post '[JSON] ArchivalResult
+  "archive" :> (
+    CreateArchiveEndpoint ArchivalResult
     :<|>
-      StrictQueryParam "id" ArchiveId
-        :> Get '[OctetStream] LazyArchiveData
+    StrictQueryParam "id" ArchiveId
+    :> Get '[OctetStream] LazyArchiveData
     :<|>
-      "async" :> (
-        ReqBody '[JSON] (NonEmpty ArchiveEntry)
-          :> QueryParam "compress" Compressor
-          :> Post '[JSON] JobQueueResult
+    "async" :> (
+      CreateArchiveEndpoint JobQueueResult
       :<|>
-        Capture "id" k
-          :> Get '[JSON] (JobQueryResult (ApolloError k) ArchivalResult)
-      )
-    )
-  :<|>
-    "test_async" :> (
-      ReqBody '[JSON] [Int] :> Post '[JSON] JobQueueResult
-    :<|>
-      Capture "id" k
-        :> Get '[JSON] (JobQueryResult (ApolloError k) Foo)
-    )
+      AsyncQueryEndpoint k ArchivalResult))
 
 newtype Foo = Foo Int
 

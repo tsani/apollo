@@ -13,14 +13,11 @@ import Apollo.Monad
 import Apollo.Types
 import qualified Apollo.YoutubeDl as Y
 
-import Control.Concurrent ( threadDelay )
 import Control.Concurrent.Async
 import Control.Concurrent.Chan
-import Control.Monad ( forM_, join )
 import Control.Monad.IO.Class ( liftIO )
 import Control.Monad.Reader
 import Data.Default.Class ( def )
-import Data.IORef
 import Data.List.NonEmpty ( NonEmpty )
 import Servant
 
@@ -45,7 +42,6 @@ server = topRoutes where
     :<|> status
     :<|> transcodings
     :<|> archives
-    :<|> testAsync
 
   download = youtubeDlSync :<|> youtubeDlAsync where
     youtubeDlSync
@@ -265,59 +261,6 @@ server = topRoutes where
 
         fmap JobQueryResult . sequence $ p <#> \(x, c) -> do
           ArchivalResult <$> pure x <*> A.getStaticUrl (StaticArchive x c)
-
-  testAsync = make :<|> check where
-    make :: [Int] -> ApolloIO JobId e AsyncResult JobQueueResult
-    make ns = do
-      let l = length ns
-
-      -- run the async job to add up the numbers
-      i <- startAsyncJob (Progress 0 l) $ do
-        -- a sum starts a zero
-        v <- liftIO (newIORef 0)
-
-        -- loop over the numbers and add them to the variable, while updating
-        -- the progress
-        forM_ (zip [1..] ns) $ \(i, n) -> do
-          reportProgress (Progress i l)
-          liftIO $ do
-            modifyIORef v (n +)
-            threadDelay 1000000
-
-        -- the result of the async job is just whatever's in the variable
-        AsyncTestResult <$> liftIO (readIORef v)
-
-      url <- A.getApiLink $ linkURI $
-        apiLink'
-          (Proxy @(QueryAsyncTest JobId))
-          i
-
-      pure JobQueueResult
-        { jobQueueId = i
-        , jobQueueQueryUrl = url
-        }
-
-    check
-      :: JobId
-      -> ApolloIO
-        JobId
-        (ApolloError JobId)
-        AsyncResult
-        (JobQueryResult (ApolloError JobId) Foo)
-    check i = do
-      r <- queryAsyncJob i
-      pure . JobQueryResult . join . (r <#>) $ \case
-        AsyncTranscodeResult{} ->
-          JobFailed $ WrongAsyncResult "test" "transcode"
-
-        AsyncTestResult n ->
-          JobComplete $ Foo n
-
-        AsyncArchiveResult{} ->
-          JobFailed $ WrongAsyncResult "test" "archive"
-
-        AsyncYoutubeDlResult _ ->
-          JobFailed $ WrongAsyncResult "test" "youtube-dl"
 
 pumpProgress
   :: (JobError m ~ ApolloError k, Show a, MonadJob m, MonadIO m)
