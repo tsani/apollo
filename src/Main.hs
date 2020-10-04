@@ -19,6 +19,7 @@ import Control.Monad.IO.Class ( liftIO )
 import Data.Aeson ( encode )
 import qualified Data.Text as T
 import Network.Wai ( Application )
+import Network.Wai.Middleware.Cors ( cors, simpleCorsResourcePolicy, CorsResourcePolicy(..) )
 import Network.Wai.Handler.Warp ( run )
 import Network.Wai.Middleware.RequestLogger ( logStdoutDev )
 import Servant
@@ -82,8 +83,11 @@ main = do
   putStrLn $ "Listening on port " ++ show httpPort
   run httpPort (logStdoutDev $ app settings)
 
+corsResourcePolicy :: CorsResourcePolicy
+corsResourcePolicy = simpleCorsResourcePolicy { corsRequestHeaders = ["content-type"] }
+
 app :: ApolloSettings' -> Application
-app settings = serve api server' where
+app settings = cors (const $ Just corsResourcePolicy) $ serve api server' where
   api :: Proxy (ApolloApi k)
   api = Proxy
 

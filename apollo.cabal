@@ -1,7 +1,7 @@
 name:                apollo
 version:             0.1.0.0
--- synopsis:            
--- description:         
+-- synopsis:
+-- description:
 license:             MIT
 license-file:        LICENSE
 author:              Jacob Errington
@@ -95,5 +95,6 @@ executable apollo
     text >=1.2,
     transformers-base >=0.4,
     wai >=3.2,
+    wai-cors >=0.2.6,
     wai-extra >=3.0,
     warp >=3.2
