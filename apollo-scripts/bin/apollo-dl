@@ -64,8 +64,12 @@ while (( $# )) ; do
     shift
 done
 
+function get_clipboard() {
+    test $(uname) = "darwin" ] && pbpaste || xclip -o
+}
+
 if [ $CLIPBOARD -eq 1 ] ; then
-    URL="$(xclip -o)"
+    URL="$(get_clipboard)"
     echo "URL from clipboard: $URL"
     HASURL=1
 fi
@@ -149,4 +153,3 @@ fi
 if [ $ENQUEUE -eq 1 ] ; then
     put '/playlist?position=end_1' "$(echo $result | jq '.result')"
 fi
-
