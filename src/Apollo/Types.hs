@@ -1,3 +1,5 @@
+{-# LANGUAGE StandaloneDeriving #-}
+
 module Apollo.Types
 ( YoutubeDlReq(..)
 , PlaylistItemId(..)
@@ -35,6 +37,9 @@ module Apollo.Types
 , JobQueryResult(..)
 , JsonVoid(JsonVoid)
 , Compressor
+, SongPlayTime(..)
+, BasicSongInfo(..)
+, basicSongInfo
 , compressWith
 , compressExtension
 , noCompression
@@ -51,7 +56,7 @@ import Data.ByteString ( ByteString )
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as C8
 import Data.Default.Class ( Default(..) )
-import Data.List ( intercalate )
+import Data.List ( intercalate, uncons )
 import Data.Monoid ( (<>) )
 import Data.Text ( Text )
 import qualified Data.Text as T
@@ -175,13 +180,27 @@ instance FromJSON PlaybackState where
     _ -> fail "invalid playback state"
   parseJSON _ = fail "cannot encode non-string as playback state"
 
+data SongPlayTime =
+  SongPlayTime
+  { sptElapsed :: Double
+  , sptOutOf :: Integer
+  }
+  deriving (Eq, Ord, Show)
+
+instance ToJSON SongPlayTime where
+  toJSON (SongPlayTime {..}) = object
+    [ "elapsed" .= sptElapsed
+    , "outOf" .= sptOutOf
+    ]
+
 -- | The status of the audio player.
 data PlayerStatus
   = PlayerStatus
     { psState :: PlaybackState
     , psPlaylistLength :: Integer
-    , psTrackId :: Maybe PlaylistItemId
-    , psNextTrackId :: Maybe PlaylistItemId
+    , psTrack :: Maybe BasicSongInfo
+    , psNextTrack :: Maybe BasicSongInfo
+    , psTime :: Maybe SongPlayTime
     , psUptime :: Integer
     , psPlaytime :: Integer
     , psLastUpdateTime :: Integer
@@ -192,11 +211,12 @@ instance ToJSON PlayerStatus where
   toJSON PlayerStatus{..} = object
     [ "state" .= toJSON psState
     , "playlistLength" .= toJSON psPlaylistLength
-    , "trackId" .= toJSON psTrackId
-    , "nextTrackId" .= toJSON psNextTrackId
+    , "track" .= toJSON psTrack
+    , "nextTrack" .= toJSON psNextTrack
     , "uptime" .= toJSON psUptime
     , "playtime" .= toJSON psPlaytime
     , "lastDbUpdate" .= toJSON psLastUpdateTime
+    , "time" .= toJSON psTime
     ]
 
 data TranscodingParameters
@@ -599,3 +619,29 @@ instance FromHttpApiData Compressor where
       _ | t == "xz" -> pure lzmaCompression
         | t == "no" -> pure noCompression
         | otherwise -> Left "unsupported compression"
+
+data BasicSongInfo =
+  BasicSongInfo
+  { bsiArtist :: Text
+  , bsiTitle :: Text
+  , bsiAlbum :: Text
+  }
+  deriving (Eq, Ord, Show)
+
+instance ToJSON BasicSongInfo where
+  toJSON (BasicSongInfo {..}) = object
+    [ "artist" .= bsiArtist
+    , "title" .= bsiTitle
+    , "album" .= bsiAlbum
+    ]
+
+basicSongInfo :: MPD.Song -> BasicSongInfo
+basicSongInfo sg = BasicSongInfo
+  { bsiArtist = get MPD.Artist
+  , bsiTitle = get MPD.Title
+  , bsiAlbum = get MPD.Album
+  } where
+  get tag = maybe "<unknown>" MPD.toText $
+    fmap fst . uncons =<< MPD.sgGetTag tag sg
+
+deriving instance Ord MPD.Id

@@ -185,14 +185,18 @@ data ApolloSettings k e a
 data ApolloError k
   -- | When an internal MPD error occurs, we just forward it along.
   = ApolloMpdError MpdError
+
   -- | A transcode was requested, but it could not be located.
   | NoSuchTranscode TrackId TranscodingParameters
+
   -- | A job was requested, but it could not be located.
   | NoSuchJob k
+
   -- | An async result was found, but it was of the wrong type.
   | WrongAsyncResult
-    String -- ^ expected type
-    String -- ^ actual type
+    String
+    String
+
   -- | A youtube-dl subprocess produced no output files.
   | EmptyYoutubeDlResult
   -- | A subprocess failed unexpectedly.

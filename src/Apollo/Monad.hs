@@ -38,6 +38,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable ( for_ )
 import qualified Data.List.NonEmpty as N
 import Data.Maybe ( fromJust )
+import qualified Data.Map as M
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
 import qualified Data.Text as T
@@ -141,11 +142,15 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
   getPlayerStatus = runMpdLockedEx $ do
     MPD.Status{..} <- MPD.status
     MPD.Stats{..} <- MPD.stats
+    songs <- M.fromList . concatMap (\s -> maybe [] (\i -> [(i, s)]) $ MPD.sgId s) <$> MPD.playlistInfo Nothing
+    let nowPlaying = flip M.lookup songs =<< stSongID
+    let nextPlaying = flip M.lookup songs =<< stNextSongID
     pure PlayerStatus
       { psState = PlaybackState stState
       , psPlaylistLength = stPlaylistLength
-      , psTrackId = PlaylistItemId . (\(MPD.Id i) -> i) <$> stSongID
-      , psNextTrackId = PlaylistItemId . (\(MPD.Id i) -> i) <$> stNextSongID
+      , psTrack = basicSongInfo <$> nowPlaying
+      , psNextTrack = basicSongInfo <$> nextPlaying
+      , psTime = uncurry SongPlayTime <$> stTime
       , psUptime = stsUptime
       , psPlaytime = stsPlaytime
       , psLastUpdateTime = stsDbUpdate
