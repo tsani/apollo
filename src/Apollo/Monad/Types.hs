@@ -19,7 +19,6 @@ import Data.Aeson ( ToJSON(..), object, (.=) )
 import Data.Default.Class
 import Data.IORef
 import Data.List.NonEmpty ( NonEmpty )
-import Data.Monoid ( (<>) )
 import Data.Text ( Text )
 import qualified Data.Text as T
 import qualified Network.MPD as MPD
@@ -199,8 +198,13 @@ data ApolloError k
 
   -- | A youtube-dl subprocess produced no output files.
   | EmptyYoutubeDlResult
+
   -- | A subprocess failed unexpectedly.
   | SubprocessDied String
+
+  -- | An unknown error occurred.
+  -- (Used to implement a MonadFail instance.)
+  | Failure String
 
 instance ToJSON k => ToJSON (ApolloError k) where
   toJSON = \case
@@ -236,5 +240,10 @@ instance ToJSON k => ToJSON (ApolloError k) where
 
     SubprocessDied msg -> object
       [ "type" .= id @Text "subprocess died"
+      , "message" .= msg
+      ]
+
+    Failure msg -> object
+      [ "type" .= id @Text "unknown error"
       , "message" .= msg
       ]

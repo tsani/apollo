@@ -18,7 +18,6 @@ import Control.Category ( (.) )
 import Control.Monad.IO.Class ( liftIO )
 import Data.Aeson ( encode )
 import qualified Data.Text as T
-import Network.Wai ( Application )
 import Network.Wai.Handler.Warp ( run )
 import Network.Wai.Middleware.RequestLogger ( logStdoutDev )
 import Servant
@@ -88,10 +87,10 @@ app settings = serve api server' where
   api = Proxy
 
   server' :: Server (ApolloApi JobId)
-  server' = enter nat server
+  server' = hoistServer api nat server
 
-  nat :: ApolloIO JobId (ApolloError JobId) AsyncResult :~> Handler
-  nat = NT $ (>>= adjust) . liftIO . runApolloIO settings
+  nat :: forall a. ApolloIO JobId (ApolloError JobId) AsyncResult a -> Handler a
+  nat = (>>= adjust) . liftIO . runApolloIO settings
 
   adjust :: Either (ApolloError JobId) a -> Handler a
   adjust m = case m of
@@ -102,4 +101,5 @@ app settings = serve api server' where
       WrongAsyncResult{} -> err400 { errBody = encode e }
       EmptyYoutubeDlResult{} -> err500 { errBody = encode e }
       SubprocessDied{} -> err500 { errBody = encode e }
+      Failure{} -> err500 { errBody = encode e }
     Right x -> pure x

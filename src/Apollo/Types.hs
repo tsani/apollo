@@ -57,7 +57,6 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Char8 as C8
 import Data.Default.Class ( Default(..) )
 import Data.List ( intercalate, uncons )
-import Data.Monoid ( (<>) )
 import Data.Text ( Text )
 import qualified Data.Text as T
 import Data.Text.Encoding ( decodeUtf8, encodeUtf8 )
@@ -65,9 +64,7 @@ import Data.Void
 import Data.Word ( Word16 )
 import qualified Network.MPD as MPD
 import Servant.API
-import System.FilePath ( FilePath )
 import Text.Read ( readMaybe )
-import Web.HttpApiData ( FromHttpApiData(..), ToHttpApiData )
 
 -- | A request to download audio from an external source using @youtube-dl@.
 -- The resulting tracks will be stored in a given 'MusicDir'.
@@ -162,7 +159,7 @@ urlToString = T.unpack . unYoutubeDlUrl
 -- libmpd modules.
 newtype PlaybackState
   = PlaybackState
-    { unPlaybackState :: MPD.State
+    { unPlaybackState :: MPD.PlaybackState
     }
   deriving (Eq, Show)
 
@@ -183,7 +180,7 @@ instance FromJSON PlaybackState where
 data SongPlayTime =
   SongPlayTime
   { sptElapsed :: Double
-  , sptOutOf :: Integer
+  , sptOutOf :: Double
   }
   deriving (Eq, Ord, Show)
 

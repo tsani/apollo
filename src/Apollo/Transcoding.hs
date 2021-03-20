@@ -16,7 +16,7 @@ import Apollo.Types
 
 import Data.ByteString.Char8 ( unpack )
 import System.Directory ( doesDirectoryExist, listDirectory )
-import System.FilePath ( (</>), (-<.>), FilePath, replaceDirectory )
+import System.FilePath ( (</>), (-<.>), replaceDirectory )
 import System.Process ( callProcess )
 
 mp3Format :: Format

@@ -15,9 +15,7 @@ import qualified Apollo.YoutubeDl as Y
 
 import Control.Concurrent.Async
 import Control.Concurrent.Chan
-import Control.Monad.IO.Class ( liftIO )
 import Control.Monad.Reader
-import Data.Default.Class ( def )
 import Data.List.NonEmpty ( NonEmpty )
 import Servant
 

@@ -100,6 +100,9 @@ instance (Bounded k, Ord k, Enum k) => MonadJobControl (ApolloIO k e r) where
   startAsyncJob p j = withJobBank $ \b ->
     liftIO (startJob p b j)
 
+instance MonadFail (ApolloIO k e r) where
+  fail = throwError . Failure
+
 -- | Because the tar archives that we use for exports have a 99-char limit on
 -- the filename, we implement this ridiculus function to drop the trailing part
 -- of the filename so that we max out at 99 chars.
@@ -142,7 +145,9 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
   getPlayerStatus = runMpdLockedEx $ do
     MPD.Status{..} <- MPD.status
     MPD.Stats{..} <- MPD.stats
-    songs <- M.fromList . concatMap (\s -> maybe [] (\i -> [(i, s)]) $ MPD.sgId s) <$> MPD.playlistInfo Nothing
+    songs <- M.fromList
+      . concatMap (\s -> maybe [] (\i -> [(i, s)]) $ MPD.sgId s)
+      <$> MPD.playlistInfo Nothing
     let nowPlaying = flip M.lookup songs =<< stSongID
     let nextPlaying = flip M.lookup songs =<< stNextSongID
     pure PlayerStatus

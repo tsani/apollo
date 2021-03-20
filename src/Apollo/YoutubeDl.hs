@@ -59,7 +59,7 @@ renderSettings YoutubeDlSettings{..} =
 -- determine the progress of the batch download will be passed to the given
 -- function and the resulting IO action executed.
 youtubeDlProgress
-  :: MonadIO m
+  :: (MonadFail m, MonadIO m)
   => Maybe FilePath
   -> YoutubeDlSettings
   -> String

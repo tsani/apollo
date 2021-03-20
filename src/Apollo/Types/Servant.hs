@@ -59,9 +59,9 @@ instance
   )
   => HasLink (StrictQueryParam sym a :> sub) where
 
-  type MkLink (StrictQueryParam sym a :> sub) = a -> MkLink sub
+  type MkLink (StrictQueryParam sym a :> sub) x = a -> MkLink sub x
 
-  toLink _ l x = toLink qp l (Just x) where
+  toLink f _ l x = toLink f qp l (Just x) where
     qp = Proxy :: Proxy (QueryParam sym a :> sub)
 
 ------------------------------------------------------------------------
