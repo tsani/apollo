@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e
+
+docker build -t jerrington/apollo .
+docker push jerrington/apollo:latest

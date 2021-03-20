@@ -1,0 +1,8 @@
+#!/bin/bash
+
+ssh j <<'EOF'
+set -e
+cd /site/lcr
+docker-compose pull
+docker-compose up -d
+EOF
