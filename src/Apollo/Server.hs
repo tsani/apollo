@@ -35,13 +35,13 @@ data AsyncResult
 server :: ApolloServer JobId (ApolloError JobId) AsyncResult
 server = topRoutes where
   topRoutes
-    = download
+    = tracks
     :<|> playlist
     :<|> status
     :<|> transcodings
     :<|> archives
 
-  download = youtubeDlSync :<|> youtubeDlAsync where
+  tracks = youtubeDlSync :<|> youtubeDlAsync where
     youtubeDlSync
       :: YoutubeDlReq
       -> Maybe Bool -- ^ ignore 404
@@ -125,7 +125,7 @@ server = topRoutes where
         ameta = maybe id (\x s -> s { Y.ytdlAddMetadata = x }) mmeta
         afmt = maybe id (\x s -> s { Y.ytdlAudioFormat = x }) mfmt
 
-  playlist = deleteTracks :<|> enqueueTracks :<|> getPlaylist where
+  playlist = deleteTracks :<|> enqueueTracks :<|> getPlaylist :<|> savePlaylist where
     deleteTracks :: [PlaylistItemId] -> ApolloIO JobId e AsyncResult Playlist
     deleteTracks items = A.deleteTracks items *> getPlaylist
 
@@ -137,6 +137,8 @@ server = topRoutes where
 
     getPlaylist :: ApolloIO JobId e AsyncResult Playlist
     getPlaylist = A.getPlaylist
+
+    savePlaylist = fmap (\s -> SaveResult { saveName = s }) . A.savePlaylist
 
   status :: ApolloIO JobId e AsyncResult PlayerStatus
   status = A.getPlayerStatus

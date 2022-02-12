@@ -43,8 +43,7 @@ class (MonadJobControl m, MonadBaseControl IO m) => MonadApollo m where
   -- | Gets the playback status.
   getPlayerStatus :: m PlayerStatus
 
-  -- | Enqueues the given tracks for playback after the current playing track,
-  -- if any.
+  -- | Enqueues the given tracks for playback at a given position.
   enqueueTracks
     :: PositionBetweenTracks -> NonEmpty FilePath -> m (NonEmpty PlaylistItemId)
 
@@ -55,6 +54,10 @@ class (MonadJobControl m, MonadBaseControl IO m) => MonadApollo m where
 
   -- | Gets the current playlist.
   getPlaylist :: m Playlist
+
+  -- | Saves the playlist using the given name. Otherwise a name is generated.
+  -- The name used is returned.
+  savePlaylist :: Maybe FilePath -> m FilePath
 
   -- | Transcodes a given track with given transcoding parameters.
   -- The unique identifier for the track is returned.
@@ -77,15 +80,6 @@ class (MonadJobControl m, MonadBaseControl IO m) => MonadApollo m where
   getStaticUrl :: StaticResource -> m Url
 
   getApiLink :: URI -> m Url
-
--- getMusicDir :: Apollo k e a FilePath
--- getMusicDir = liftF $ GetMusicDir id
---
--- getTranscodeDir :: Apollo k e a FilePath
--- getTranscodeDir = liftF $ GetTranscodeDir id
---
--- getArchiveDir :: Apollo k e a FilePath
--- getArchiveDir = liftF $ GetArchiveDir id
 
 ------------------------------------------------------------------------
 --- Derived actions                                                  ---

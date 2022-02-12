@@ -31,30 +31,30 @@ type CreateArchiveEndpoint a =
 -- jobs.
 type ApolloApiV1 k =
   "tracks" :> "add" :> "youtube-dl" :> (
-  YoutubeDlEndpoint (NonEmpty Entry)
-  :<|>
-  "async" :> (
-    YoutubeDlEndpoint JobQueueResult
+    YoutubeDlEndpoint (NonEmpty Entry)
     :<|>
-    AsyncQueryEndpoint k (NonEmpty Entry)))
+    "async" :> (
+      YoutubeDlEndpoint JobQueueResult
+      :<|>
+      AsyncQueryEndpoint k (NonEmpty Entry)))
   :<|>
   "playlist" :> (
     Capture "tracks" [PlaylistItemId] :> Delete '[JSON] Playlist
     :<|>
-    QueryParam "position" PositionBetweenTracks
-    :> ReqBody '[JSON] (NonEmpty FilePath)
-    :> Put '[JSON] (NonEmpty PlaylistItemId)
-    :<|>
-    Get '[JSON] Playlist)
+      QueryParam "position" PositionBetweenTracks
+        :> ReqBody '[JSON] (NonEmpty FilePath)
+        :> Put '[JSON] (NonEmpty PlaylistItemId)
+    :<|> Get '[JSON] Playlist
+    :<|> QueryParam "name" String :> Post '[JSON] SaveResult)
   :<|>
   "status" :> Get '[JSON] PlayerStatus
   :<|>
   "transcode" :> (
     ReqBody '[JSON] TranscodeReq :> Post '[JSON] TrackIdW
     :<|>
-    StrictQueryParam "trackId" TrackId
-    :> StrictQueryParam "params" TranscodingParameters
-    :> Get '[OctetStream] LazyTrackData
+      StrictQueryParam "trackId" TrackId
+      :> StrictQueryParam "params" TranscodingParameters
+      :> Get '[OctetStream] LazyTrackData
     :<|>
     "async" :> (
       ReqBody '[JSON] (NonEmpty TranscodeReq)
@@ -73,10 +73,6 @@ type ApolloApiV1 k =
       :<|>
       AsyncQueryEndpoint k ArchivalResult))
 
-newtype Foo = Foo Int
-
-instance ToJSON Foo where
-  toJSON (Foo n) = object [ "foo" .= n ]
 
 type V1 = "v1"
 
@@ -108,12 +104,6 @@ type QueryAsyncArchive k
   :> "async"
   :> Capture "id" k
   :> Get '[JSON] (JobQueryResult (ApolloError k) ArchivalResult)
-
-type QueryAsyncTest k
-  = V1
-  :> "test_async"
-  :> Capture "id" k
-  :> Get '[JSON] (JobQueryResult (ApolloError k) Foo)
 
 type QueryAsyncYoutubeDl k
   = V1

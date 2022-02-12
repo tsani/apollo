@@ -41,7 +41,11 @@ import Data.Maybe ( fromJust )
 import qualified Data.Map as M
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
+import Data.Time.Clock ( getCurrentTime )
+import Data.Time.Format ( formatTime, defaultTimeLocale )
+import Data.Time.Format.ISO8601 ( iso8601Show )
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Data.Traversable ( for )
 import qualified Network.MPD as MPD
 import Network.URI
@@ -194,6 +198,12 @@ instance (Enum k, Ord k, Bounded k) => MonadApollo (ApolloIO k e r) where
       { playlistTracks = entries
       , playlistNowPlaying = st >>= (\(MPD.Id i) -> pure $ PlaylistItemId i)
       }
+
+  savePlaylist mname = do
+    let addSuffix = maybe id (\s s1 -> s1 ++ "-" ++ s) mname
+    realName <- addSuffix <$> liftIO getNowString
+    runMpdLockedEx $ MPD.save (MPD.PlaylistName (T.encodeUtf8 (T.pack realName)))
+    pure realName
 
   makeTranscode track params = do
     md <- asks apolloMusicDirP
@@ -352,3 +362,6 @@ toFilePath md td a = case a of
   ArchiveTranscode tid params ->
     maybe (jobError $ NoSuchTranscode tid params) pure
       =<< liftIO (getExistingTranscode (Just td) tid params)
+
+getNowString :: IO FilePath
+getNowString = iso8601Show <$> getCurrentTime

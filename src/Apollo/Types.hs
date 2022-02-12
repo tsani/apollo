@@ -1,5 +1,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 
+-- | Miscellaneous domain types.
+
 module Apollo.Types
 ( YoutubeDlReq(..)
 , PlaylistItemId(..)
@@ -39,6 +41,7 @@ module Apollo.Types
 , Compressor
 , SongPlayTime(..)
 , BasicSongInfo(..)
+, SaveResult(..)
 , basicSongInfo
 , compressWith
 , compressExtension
@@ -642,3 +645,9 @@ basicSongInfo sg = BasicSongInfo
     fmap fst . uncons =<< MPD.sgGetTag tag sg
 
 deriving instance Ord MPD.Id
+
+data SaveResult =
+  SaveResult { saveName :: String }
+
+instance ToJSON SaveResult where
+  toJSON r = object [ "name" .= saveName r ]
