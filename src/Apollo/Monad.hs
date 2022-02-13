@@ -42,7 +42,6 @@ import qualified Data.Map as M
 import Data.Monoid ( (<>) )
 import Data.String ( fromString )
 import Data.Time.Clock ( getCurrentTime )
-import Data.Time.Format ( formatTime, defaultTimeLocale )
 import Data.Time.Format.ISO8601 ( iso8601Show )
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T

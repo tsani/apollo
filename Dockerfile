@@ -33,12 +33,12 @@ RUN stack install
 
 FROM base AS runtime
 
-RUN apt install -y python3-pip
-RUN pip3 install youtube-dl
-RUN apt install -y ffmpeg
+RUN apt install -y ffmpeg curl python
+RUN curl -L https://yt-dl.org/downloads/latest/youtube-dl -o /usr/local/bin/youtube-dl
+RUN chmod a+rx /usr/local/bin/youtube-dl
 
 FROM runtime AS final
 COPY --from=builder /root/.local/bin/apollo /app
 
-WORKDIR /lcr
+WORKDIR /data
 CMD /app

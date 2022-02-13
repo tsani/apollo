@@ -1,0 +1,47 @@
+---
+version: "3.3"
+services:
+  mpd:
+    image: vimagick/mpd
+    ports:
+      - "6600:6600"
+    expose:
+      - "6600"
+    volumes:
+      - mpd-music:/var/lib/mpd/music
+      - mpd-playlists:/var/lib/mpd/playlists
+      - mpd-run:/run/mpd
+      - mpd-home:/home
+      - type: bind
+        source: ./mpd.conf
+        target: /etc/mpd.conf
+        read_only: true
+
+  apollo:
+    image: jerrington/apollo:test
+    ports:
+      - 8082:8082
+    volumes:
+      - apollo-data:/data
+    environment:
+      - APOLLO_PORT=8082
+      - APOLLO_MPD_HOST=mpd
+      - APOLLO_MPD_PORT=6600
+      - APOLLO_MPD_PASSWORD=password
+      - APOLLO_API_DOMAIN=localhost
+      - APOLLO_API_SCHEME=http
+      - APOLLO_API_PORT=80
+      - APOLLO_STATIC_DOMAIN=localhost
+      - APOLLO_STATIC_SCHEME=http
+      - APOLLO_STATIC_PORT=8088
+      - APOLLO_MUSIC_DIR=music
+      - APOLLO_TRANSCODE_DIR=transcode
+      - APOLLO_ARCHIVE_DIR=archives
+      - APOLLO_TMP_DIR=/tmp
+
+volumes:
+  mpd-music:
+  mpd-playlists:
+  mpd-run:
+  mpd-home:
+  apollo-data:
